@@ -2042,29 +2042,99 @@ def _run_broadcast(admin_chat_id, source_message_id, use_copy=False):
             pass
 
 
-def _send_order_summary(chat_id, user_id, session):
-    """Send order summary with inline confirm/cancel (same for buyers and admins).
+def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None):
+    """Reserve accounts atomically, generate QR, send it to the user, and start
+    the payment polling/countdown. Replaces the previous confirm-summary step.
 
-    Stores summary_message_id in session.
+    Returns True on success, False on failure (session is cleared on failure).
     """
-    quantity = session['quantity']
-    total_price = session['total_price']
-    summary = (
-        f"<b>សូមបញ្ជាក់ការបញ្ជាទិញ</b>\n\n"
-        f"<blockquote>🔹 ចំនួន: {quantity}\n\n"
-        f"🔹 ប្រភេទ: {session['account_type']}\n\n"
-        f"🔹 តម្លៃ: {total_price}$</blockquote>"
-    )
-    markup = {
-        'inline_keyboard': [[
-            {'text': '🚫 បោះបង់', 'callback_data': 'cancel_buy'},
-            {'text': '✅ យល់ព្រម', 'callback_data': 'confirm_buy'},
-        ]]
-    }
-    resp = send_message(chat_id, summary, reply_to_message_id=False, parse_mode="HTML", reply_markup=markup)
-    if resp and resp.get('result'):
+    account_type = session.get('account_type')
+    quantity = session.get('quantity', 1)
+
+    with _data_lock:
+        pool = accounts_data.get('account_types', {}).get(account_type, [])
+        available = len(pool)
+        if available < quantity:
+            reserved = None
+        else:
+            reserved = pool[:quantity]
+            accounts_data['account_types'][account_type] = pool[quantity:]
+            session['reserved_accounts'] = list(reserved)
+            session['available_count'] = len(accounts_data['account_types'][account_type])
+
+    if reserved is None:
+        if callback_query_id:
+            answer_callback(
+                callback_query_id,
+                f"សូមអភ័យទោស! មានត្រឹមតែ {available} Account នៅក្នុងស្តុក",
+                True,
+            )
+        else:
+            send_message(chat_id, f"សុំទោស! មានត្រឹមតែ {available} នៅក្នុងស្តុក")
         with _data_lock:
-            session['summary_message_id'] = resp['result']['message_id']
+            if user_id in user_sessions:
+                del user_sessions[user_id]
+        save_sessions_async()
+        return False
+
+    save_data()
+    if callback_query_id:
+        answer_callback(callback_query_id, 'កំពុងបង្កើត QR...')
+    with _data_lock:
+        session['state'] = 'payment_pending'
+
+    try:
+        img_bytes, md5_or_err, qr_string = generate_payment_qr(session['total_price'])
+        if not img_bytes:
+            err_detail = md5_or_err or "មិនដឹងមូលហេតុ"
+            logger.error(f"QR generation returned None: {err_detail}")
+            if str(user_id) == str(ADMIN_ID):
+                send_message(chat_id,
+                    f"❌ *QR បរាជ័យ (Admin Debug):*\n`{err_detail}`",
+                    parse_mode="Markdown")
+            else:
+                send_message(chat_id,
+                    "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។",
+                    parse_mode="Markdown")
+                send_message(ADMIN_ID,
+                    f"⚠️ *QR Error (user {user_id}):*\n`{err_detail}`",
+                    parse_mode="Markdown")
+            _release_reserved_accounts(session)
+            with _data_lock:
+                if user_id in user_sessions:
+                    del user_sessions[user_id]
+            save_sessions_async()
+            return False
+
+        md5_hash = md5_or_err
+        session['md5_hash'] = md5_hash
+        started_at = time.time()
+        session['qr_sent_at'] = started_at
+        amount = session['total_price']
+        photo_resp = send_photo_bytes(
+            chat_id, img_bytes,
+            caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
+            parse_mode='HTML',
+            reply_markup=CHECK_PAYMENT_KEYBOARD,
+        )
+        if photo_resp and photo_resp.get('result'):
+            msg_id = photo_resp['result']['message_id']
+            session['photo_message_id'] = msg_id
+            session['qr_message_id'] = msg_id
+            _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
+        save_sessions_async()
+        save_pending_payment_async(user_id, chat_id, session)
+        logger.info(f"Generated QR for user {user_id}: Amount ${session['total_price']}, MD5: {md5_hash}")
+        return True
+    except Exception as e:
+        logger.error(f"Error generating KHQR: {type(e).__name__}: {e}")
+        send_message(chat_id, "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។", parse_mode="Markdown")
+        _release_reserved_accounts(session)
+        with _data_lock:
+            if user_id in user_sessions:
+                del user_sessions[user_id]
+        save_sessions_async()
+        return False
 
 
 def _purchase_notification_targets():
@@ -2158,99 +2228,6 @@ def handle_callback_query(update):
             else:
                 account_type = callback_data.replace('out_of_stock_', '')
             send_message(chat_id, f"សូមអភ័យទោស Account {account_type} អស់ពីស្តុក 🪤")
-
-        # Handle confirm buy — generate QR and proceed to payment
-        elif callback_data == 'confirm_buy':
-            session = user_sessions.get(user_id)
-            if not session or session.get('state') != 'waiting_for_confirmation':
-                answer_callback(callback_query['id'])
-                return
-
-            # Reserve the exact accounts now so they can't be sold to anyone
-            # else while this user is paying. Stock check + reservation must
-            # happen atomically under the data lock.
-            account_type = session.get('account_type')
-            quantity = session.get('quantity', 1)
-            with _data_lock:
-                pool = accounts_data.get('account_types', {}).get(account_type, [])
-                available = len(pool)
-                if available < quantity:
-                    reserved = None
-                else:
-                    reserved = pool[:quantity]
-                    accounts_data['account_types'][account_type] = pool[quantity:]
-                    session['reserved_accounts'] = list(reserved)
-                    session['available_count'] = len(accounts_data['account_types'][account_type])
-
-            if reserved is None:
-                answer_callback(
-                    callback_query['id'],
-                    f"សូមអភ័យទោស! មានត្រឹមតែ {available} Account នៅក្នុងស្តុក",
-                    True,
-                )
-                with _data_lock:
-                    if user_id in user_sessions:
-                        del user_sessions[user_id]
-                save_sessions_async()
-                return
-            save_data()
-            answer_callback(callback_query['id'], 'កំពុងបង្កើត QR...')
-            with _data_lock:
-                session['state'] = 'payment_pending'
-            # Delete the summary message
-            summary_message_id = callback_query['message']['message_id']
-            delete_message_async(chat_id, summary_message_id)
-            try:
-                img_bytes, md5_or_err, qr_string = generate_payment_qr(session['total_price'])
-                if not img_bytes:
-                    err_detail = md5_or_err or "មិនដឹងមូលហេតុ"
-                    logger.error(f"QR generation returned None: {err_detail}")
-                    # Notify admin with the actual error
-                    if str(user_id) == str(ADMIN_ID):
-                        send_message(chat_id,
-                            f"❌ *QR បរាជ័យ (Admin Debug):*\n`{err_detail}`",
-                            parse_mode="Markdown")
-                    else:
-                        send_message(chat_id,
-                            "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។",
-                            parse_mode="Markdown")
-                        send_message(ADMIN_ID,
-                            f"⚠️ *QR Error (user {user_id}):*\n`{err_detail}`",
-                            parse_mode="Markdown")
-                    _release_reserved_accounts(session)
-                    with _data_lock:
-                        if user_id in user_sessions:
-                            del user_sessions[user_id]
-                    save_sessions_async()
-                    return
-                md5_hash = md5_or_err
-                session['md5_hash'] = md5_hash
-                started_at = time.time()
-                session['qr_sent_at'] = started_at
-                amount = session['total_price']
-                photo_resp = send_photo_bytes(
-                    chat_id, img_bytes,
-                    caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
-                    parse_mode='HTML',
-                    reply_markup=CHECK_PAYMENT_KEYBOARD,
-                )
-                if photo_resp and photo_resp.get('result'):
-                    msg_id = photo_resp['result']['message_id']
-                    session['photo_message_id'] = msg_id
-                    session['qr_message_id'] = msg_id
-                    _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
-                save_sessions_async()
-                save_pending_payment_async(user_id, chat_id, session)
-                logger.info(f"Generated QR for user {user_id}: Amount ${session['total_price']}, MD5: {md5_hash}")
-            except Exception as e:
-                logger.error(f"Error generating KHQR: {type(e).__name__}: {e}")
-                send_message(chat_id, "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។", parse_mode="Markdown")
-                _release_reserved_accounts(session)
-                with _data_lock:
-                    if user_id in user_sessions:
-                        del user_sessions[user_id]
-                save_sessions_async()
-            return
 
         # Admin: delete type — step 1: show confirmation
         elif callback_data.startswith('dts:') and is_admin(user_id):
@@ -2418,19 +2395,20 @@ def handle_callback_query(update):
 
             return
 
-        # Handle cancel buy — cancel from summary screen (before QR)
+        # Handle cancel buy — kept for backward compatibility with any
+        # in-flight messages that still have a 'cancel_buy' inline button.
         elif callback_data == 'cancel_buy':
             answer_callback(callback_query['id'])
             with _data_lock:
                 if user_id in user_sessions:
                     del user_sessions[user_id]
             save_sessions_async()
-            summary_message_id = callback_query['message']['message_id']
-            delete_message_async(chat_id, summary_message_id)
+            cancel_message_id = callback_query['message']['message_id']
+            delete_message_async(chat_id, cancel_message_id)
             show_account_selection(chat_id)
             return
 
-        # Handle quantity number button press
+        # Handle quantity number button press — go straight to QR payment
         elif callback_data.startswith('qty:'):
             # Two callback formats are supported:
             #   qty:<N>                 (legacy — relies on existing session)
@@ -2460,7 +2438,7 @@ def handle_callback_query(update):
             if target_type and (
                 not session
                 or session.get('account_type') != target_type
-                or session.get('state') not in ('waiting_for_quantity', 'waiting_for_confirmation')
+                or session.get('state') != 'waiting_for_quantity'
             ):
                 if target_type not in accounts_data.get('account_types', {}):
                     answer_callback(callback_query['id'], 'ប្រភេទនេះមិនមានទៀតហើយ។', True)
@@ -2479,7 +2457,7 @@ def handle_callback_query(update):
                         'available_count': available,
                     }
                 session = user_sessions[user_id]
-            elif not session or session.get('state') not in ('waiting_for_quantity', 'waiting_for_confirmation'):
+            elif not session or session.get('state') != 'waiting_for_quantity':
                 # Legacy button with no session context — nothing we can do.
                 answer_callback(callback_query['id'])
                 return
@@ -2488,30 +2466,17 @@ def handle_callback_query(update):
                 answer_callback(callback_query['id'], f"សុំទោស! មានត្រឹមតែ {session['available_count']} នៅក្នុងស្តុក", True)
                 return
 
-            # If the user is already on the summary screen and re-picks the same
-            # quantity, just acknowledge — nothing to update.
-            if session.get('state') == 'waiting_for_confirmation' and session.get('quantity') == quantity:
-                answer_callback(callback_query['id'])
-                return
-
             total_price = quantity * session['price']
-            previous_summary_id = session.get('summary_message_id')
             with _data_lock:
                 session['quantity'] = quantity
                 session['total_price'] = total_price
-                session['state'] = 'waiting_for_confirmation'
-                # Clear stale id so the new summary id can be saved cleanly.
-                session.pop('summary_message_id', None)
 
-            # Answer immediately before any I/O so the button feels instant
-            answer_callback(callback_query['id'])
-            save_sessions_async()
+            # Delete the quantity-selection message so the chat stays clean.
+            qty_message_id = callback_query['message']['message_id']
+            delete_message_async(chat_id, qty_message_id)
 
-            # Remove the previous order summary (if any) so only the latest is shown.
-            if previous_summary_id:
-                delete_message_async(chat_id, previous_summary_id)
-
-            _send_order_summary(chat_id, user_id, session)
+            _start_payment_for_session(chat_id, user_id, session,
+                                       callback_query_id=callback_query['id'])
             return
 
         # Handle check payment button
@@ -2838,93 +2803,27 @@ def handle_message(update):
                 show_account_selection(chat_id)
                 return
 
-            # Handle quantity input for purchase
+            # Handle quantity input for purchase — go straight to QR payment
             if session['state'] == 'waiting_for_quantity':
                 try:
                     quantity = int(text.strip())
                     if quantity <= 0:
                         send_message(chat_id, "សូមបញ្ចូលចំនួនធំជាង 0")
                         return
-                    
+
                     if quantity > session['available_count']:
                         send_message(chat_id, f"សុំទោស! មានត្រឹមតែ {session['available_count']} នៅក្នុងស្តុក")
                         return
-                    
-                    # Calculate total price
+
                     total_price = quantity * session['price']
-                    
-                    # Update session with purchase details, wait for confirmation
                     with _data_lock:
                         session['quantity'] = quantity
                         session['total_price'] = total_price
-                        session['state'] = 'waiting_for_confirmation'
-                    save_sessions_async()
-                    
-                    _send_order_summary(chat_id, user_id, session)
+                    _start_payment_for_session(chat_id, user_id, session)
                     return
-                    
+
                 except ValueError:
                     send_message(chat_id, "សូមបញ្ចូលចំនួនជាលេខ (ឧទាហរណ៍: 1, 2, 3)")
-                    return
-
-            # Handle confirm/cancel reply keyboard buttons
-            elif session['state'] == 'waiting_for_confirmation':
-                if text.strip() == '✅ យល់ព្រម':
-                    with _data_lock:
-                        session['state'] = 'payment_pending'
-                    try:
-                        img_bytes, md5_or_err, qr_string = generate_payment_qr(session['total_price'])
-                        if not img_bytes:
-                            err_detail = md5_or_err or "មិនដឹងមូលហេតុ"
-                            send_message(chat_id, "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។", parse_mode="Markdown")
-                            send_message(ADMIN_ID, f"⚠️ *QR Error (user {user_id}):*\n`{err_detail}`", parse_mode="Markdown")
-                            with _data_lock:
-                                if user_id in user_sessions:
-                                    del user_sessions[user_id]
-                            save_sessions_async()
-                            return
-                        md5_hash = md5_or_err
-                        session['md5_hash'] = md5_hash
-                        started_at = time.time()
-                        session['qr_sent_at'] = started_at
-                        amount = session['total_price']
-                        dot_resp = send_sticker(chat_id, "CAACAgUAAxkBAAILvGnnaWwK-AXFeING4WOtIIKmoFYqAAIVAAMxIPsrpHGBfRB524Y7BA", reply_markup=_main_kb(user_id))
-                        if dot_resp and dot_resp.get('result'):
-                            session['dot_message_id'] = dot_resp['result']['message_id']
-                        photo_resp = send_photo_bytes(
-                            chat_id, img_bytes,
-                            caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
-                            parse_mode='HTML',
-                            reply_markup=CHECK_PAYMENT_KEYBOARD,
-                        )
-                        if photo_resp and photo_resp.get('result'):
-                            msg_id = photo_resp['result']['message_id']
-                            session['photo_message_id'] = msg_id
-                            session['qr_message_id'] = msg_id
-                            _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
-                        save_sessions_async()
-                        save_pending_payment_async(user_id, chat_id, session)
-                    except Exception as e:
-                        logger.error(f"Error generating KHQR: {type(e).__name__}: {e}")
-                        send_message(chat_id, "❌ *មានបញ្ហាក្នុងការបង្កើត QR Code*\n\nសូមព្យាយាមម្តងទៀត។", parse_mode="Markdown")
-                        with _data_lock:
-                            if user_id in user_sessions:
-                                del user_sessions[user_id]
-                        save_sessions_async()
-                    return
-
-                elif text.strip() == '🚫 បោះបង់':
-                    summary_msg_id = session.get('summary_message_id')
-                    if summary_msg_id:
-                        delete_message_async(chat_id, summary_msg_id)
-                    dot_msg_id = session.get('dot_message_id')
-                    if dot_msg_id:
-                        delete_message_async(chat_id, dot_msg_id)
-                    with _data_lock:
-                        if user_id in user_sessions:
-                            del user_sessions[user_id]
-                    save_sessions_async()
-                    show_account_selection(chat_id)
                     return
 
         # Handle non-admin users
