@@ -1057,75 +1057,42 @@ def send_sticker(chat_id, sticker_id, reply_markup=None):
         logger.error(f"Failed to send sticker: {e}")
         return None
 
-def send_photo(chat_id, photo_path, caption=None, parse_mode=None, reply_markup=None, message_effect_id=None):
-    """Send a photo to a specific chat."""
-    url = f"{API_URL}/sendPhoto"
-    data = {
-        'chat_id': chat_id
-    }
-    
-    if caption:
-        data['caption'] = caption
-    
-    if parse_mode:
-        data['parse_mode'] = parse_mode
-    
-    if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
-    
-    if message_effect_id:
-        data['message_effect_id'] = message_effect_id
-    
-    try:
-        with open(photo_path, 'rb') as photo:
-            files = {'photo': photo}
-            response = http.post(url, data=data, files=files, timeout=10)
-            response.raise_for_status()
-            return response.json()
-    except requests.RequestException as e:
-        logger.error(f"Failed to send photo: {e}")
-        return None
-
 def send_start_banner(chat_id, caption=None, parse_mode=None, message_effect_id=None, reply_markup=None):
+    """Send the start banner stored in Neon (as a Telegram file_id).
+
+    If no banner has been uploaded yet, fall back to a plain text message
+    with the same caption — no local files are read.
+    """
     global START_BANNER_FILE_ID
-    url = f"{API_URL}/sendPhoto"
-    data = {'chat_id': chat_id}
-    if caption:
-        data['caption'] = caption
-    if parse_mode:
-        data['parse_mode'] = parse_mode
-    if message_effect_id:
-        data['message_effect_id'] = message_effect_id
-    if reply_markup:
-        data['reply_markup'] = json.dumps(reply_markup)
 
     if START_BANNER_FILE_ID:
+        url = f"{API_URL}/sendPhoto"
+        data = {'chat_id': chat_id, 'photo': START_BANNER_FILE_ID}
+        if caption:
+            data['caption'] = caption
+        if parse_mode:
+            data['parse_mode'] = parse_mode
+        if message_effect_id:
+            data['message_effect_id'] = message_effect_id
+        if reply_markup:
+            data['reply_markup'] = json.dumps(reply_markup)
         try:
-            data['photo'] = START_BANNER_FILE_ID
             response = http.post(url, data=data, timeout=6)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
-            logger.warning(f"Cached start banner failed, uploading again: {e}")
+            logger.warning(f"Cached start banner failed, falling back to text: {e}")
             START_BANNER_FILE_ID = ""
-            data.pop('photo', None)
+            _run_background("clear_banner_file_id", set_setting, 'START_BANNER_FILE_ID', '')
 
-    try:
-        with open('start_banner.jpg', 'rb') as photo:
-            files = {'photo': photo}
-            response = http.post(url, data=data, files=files, timeout=10)
-            response.raise_for_status()
-            result = response.json()
-            photos = result.get('result', {}).get('photo', [])
-            if photos:
-                new_file_id = photos[-1].get('file_id', "")
-                if new_file_id and new_file_id != START_BANNER_FILE_ID:
-                    START_BANNER_FILE_ID = new_file_id
-                    _run_background("save_banner_file_id", set_setting, 'START_BANNER_FILE_ID', new_file_id)
-            return result
-    except requests.RequestException as e:
-        logger.error(f"Failed to send start banner: {e}")
-        return None
+    # No banner stored in Neon — send the caption as a plain message.
+    return send_message(
+        chat_id,
+        caption or "",
+        parse_mode=parse_mode,
+        reply_to_message_id=False,
+        reply_markup=reply_markup,
+    )
 
 def answer_callback(callback_query_id, text=None, show_alert=False):
     data = {'callback_query_id': callback_query_id}
@@ -1409,6 +1376,7 @@ BTN_CHANNEL         = '📢 Channel ID'
 BTN_ADMINS          = '👑 គ្រប់គ្រង Admin'
 BTN_MAINTENANCE     = '🛠 Maintenance Mode'
 BTN_BROADCAST       = '📢 ផ្សាយព័ត៌មាន'
+BTN_BANNER          = '🖼 រូប Banner'
 BTN_BACK_SETTINGS   = '↩️ ត្រឡប់ទៅកំណត់'
 
 BTN_PAYMENT_EDIT    = '✏️ ប្តូរឈ្មោះ Payment'
@@ -1440,7 +1408,8 @@ ADMIN_SETTINGS_REPLY_KEYBOARD = {
         [{'text': BTN_USERS}, {'text': BTN_BUYERS}],
         [{'text': BTN_PAYMENT}, {'text': BTN_BAKONG}],
         [{'text': BTN_CHANNEL}, {'text': BTN_ADMINS}],
-        [{'text': BTN_BROADCAST}, {'text': BTN_MAINTENANCE}],
+        [{'text': BTN_BROADCAST}, {'text': BTN_BANNER}],
+        [{'text': BTN_MAINTENANCE}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1513,6 +1482,7 @@ ADD_ACCOUNT_KEYBOARD = {
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
+    BTN_BANNER,
     BTN_BACK_SETTINGS,
     BTN_PAYMENT_EDIT, BTN_BAKONG_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR,
@@ -1897,6 +1867,14 @@ def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
                 del user_sessions[user_id]
         save_sessions_async()
         send_message(chat_id, msg, parse_mode="HTML", reply_to_message_id=False, reply_markup=_main_kb(user_id))
+        return True
+
+    if key == 'banner':
+        # Photo uploads are handled in handle_message before reaching here.
+        # Any text input means the admin sent something other than a photo.
+        send_message(chat_id,
+            "📷 សូម​ផ្ញើ​ជា​<b>រូបភាព</b> (Photo) ប៉ុណ្ណោះ ឬចុច 🚫 បោះបង់",
+            parse_mode="HTML", reply_to_message_id=False)
         return True
 
     if key == 'broadcast':
@@ -2445,7 +2423,7 @@ def handle_callback_query(update):
 
 def handle_message(update):
     """Handle incoming message."""
-    global MAINTENANCE_MODE, PAYMENT_NAME, CHANNEL_ID
+    global MAINTENANCE_MODE, PAYMENT_NAME, CHANNEL_ID, START_BANNER_FILE_ID
     try:
         # Handle callback queries first
         if 'callback_query' in update:
@@ -2506,11 +2484,29 @@ def handle_message(update):
             send_admin_settings_menu(chat_id)
             return
 
-        # Admin: handle pending input from the settings menu (payment, bakong, channel, admin add/remove)
+        # Admin: handle pending input from the settings menu (payment, bakong, channel, admin add/remove, banner)
         if is_admin(user_id) and user_id in user_sessions:
             _state = str(user_sessions[user_id].get('state', ''))
             if _state.startswith('admin_input:'):
                 _key = _state.split(':', 1)[1]
+                # Special-case banner upload: capture the photo's file_id directly.
+                if _key == 'banner' and message.get('photo'):
+                    photos = message.get('photo') or []
+                    new_file_id = photos[-1].get('file_id', '') if photos else ''
+                    if new_file_id:
+                        START_BANNER_FILE_ID = new_file_id
+                        set_setting('START_BANNER_FILE_ID', new_file_id)
+                        with _data_lock:
+                            if user_id in user_sessions:
+                                del user_sessions[user_id]
+                        save_sessions_async()
+                        send_message(chat_id,
+                            "✅ <b>បាន​រក្សា​ទុក​រូប Banner ថ្មី​រួចរាល់!</b>\n\n"
+                            "<i>រូប​ត្រូវ​បាន​រក្សា​ក្នុង Neon DB ហើយ​នឹង​បង្ហាញ​នៅ​ពេល​អ្នក​ប្រើ /start។</i>",
+                            parse_mode="HTML", reply_to_message_id=False,
+                            reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
+                        logger.info(f"Admin {user_id} updated start banner (file_id stored in Neon)")
+                        return
                 if _handle_admin_settings_input(chat_id, user_id, message_id, _key, text):
                     return
 
@@ -2657,6 +2653,13 @@ def handle_message(update):
                     "📢 សូមផ្ញើ​សារ​ដែល​ចង់​ផ្សាយ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់៖\n\n"
                     "<i>សារ​នឹង​ត្រូវ​បាន Forward ទៅ​អ្នក​ប្រើ​ប្រាស់ "
                     "ដោយ​បង្ហាញ​ស្លាក “Forwarded from” ពី​គណនី​អ្នក។</i>")
+                return
+            if btn == BTN_BANNER:
+                current = "✅ មាន​រូប Banner រួច​ហើយ" if START_BANNER_FILE_ID else "ℹ️ មិនទាន់មានរូប Banner ទេ"
+                _prompt_admin_input(chat_id, user_id, 'banner',
+                    f"🖼 <b>ប្តូររូប Banner</b>\n\n{current}\n\n"
+                    f"សូមផ្ញើ​រូបភាព​ថ្មី​ដែល​ចង់​ប្រើ​ជា Banner ពេល​ប្រើ /start។\n"
+                    f"<i>រូប​នឹង​ត្រូវ​បាន​រក្សា​ទុក​ក្នុង Neon DB (ជា file_id របស់ Telegram)។</i>")
                 return
 
             # ── Submenu leaf actions ──
