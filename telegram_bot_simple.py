@@ -738,6 +738,36 @@ def get_pending_payment(user_id):
         logger.error(f"Failed to get pending payment: {e}")
     return None
 
+def _has_active_purchase(user_id):
+    """Return True if the user has an in-flight purchase that must be
+    completed (or cancelled) before a new order can be started.
+
+    Covers both the quantity-selection step and the QR/payment-pending step,
+    including pending payments persisted to the DB across restarts.
+    """
+    try:
+        sess = user_sessions.get(user_id)
+        if sess and sess.get('state') in ('waiting_for_quantity', 'payment_pending'):
+            return True
+        if get_pending_payment(user_id):
+            return True
+    except Exception as e:
+        logger.error(f"_has_active_purchase error: {e}")
+    return False
+
+
+def _notify_must_finish_order(chat_id):
+    """Tell the buyer to finish (or cancel) the current order first."""
+    send_message(
+        chat_id,
+        "⏳ <b>សូមបញ្ចប់ការទិញបច្ចុប្បន្នជាមុនសិន</b>\n\n"
+        "អ្នកមានការបញ្ជាទិញមួយកំពុងដំណើរការ។ សូមបញ្ចប់ការទូទាត់ "
+        "ឬចុច 🚫 បោះបង់ មុននឹងចាប់ផ្តើមការទិញថ្មី។",
+        parse_mode="HTML",
+        reply_to_message_id=False,
+    )
+
+
 def _reset_user_session(user_id, save=True):
     """Atomically clear a user's in-memory session, release any reserved
     accounts back to the stock pool, and drop any persisted pending-payment
@@ -2347,6 +2377,16 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
             if not account_type:
                 answer_callback(callback_query['id'], 'ប្រភេទនេះមិនមានទៀតហើយ។ សូមចាប់ផ្តើមម្តងទៀត។', True)
                 return
+
+            # Buyers must finish (or cancel) the current order before starting a new one.
+            if not is_admin(user_id) and _has_active_purchase(user_id):
+                answer_callback(
+                    callback_query['id'],
+                    "សូមបញ្ចប់ការទិញបច្ចុប្បន្នជាមុនសិន ទើបអាចបញ្ជាទិញថ្មីបាន។",
+                    True,
+                )
+                return
+
             answer_callback(callback_query['id'])
             
             # Check if account type exists and has stock
@@ -2769,6 +2809,9 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
 
         if text.strip() == '/start':
             logger.info(f"User {user_id} triggered account selection interface")
+            if not is_admin(user_id) and _has_active_purchase(user_id):
+                _notify_must_finish_order(chat_id)
+                return
             _reset_user_session(user_id)
             show_account_selection_local()
             return
@@ -2982,8 +3025,14 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
         if user_id in user_sessions:
             session = user_sessions[user_id]
 
-            # Handle stale payment_pending session — silently clear and show menu
+            # Handle payment_pending session.
+            # Buyers must complete (or cancel via the QR's 🚫 button) the
+            # current order before starting a new one. Admins keep the
+            # legacy auto-clear behaviour for testing convenience.
             if session.get('state') == 'payment_pending':
+                if not is_admin(user_id):
+                    _notify_must_finish_order(chat_id)
+                    return
                 # Return any reserved emails so they aren't lost.
                 _release_reserved_accounts(session)
                 with _data_lock:
