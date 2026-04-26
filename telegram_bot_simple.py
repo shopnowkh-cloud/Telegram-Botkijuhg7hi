@@ -2338,7 +2338,9 @@ def handle_callback_query(update):
         # Handle quantity number button press
         elif callback_data.startswith('qty:'):
             session = user_sessions.get(user_id)
-            if not session or session.get('state') != 'waiting_for_quantity':
+            # Allow picking a quantity both during initial selection and while
+            # the order summary is open (so the user can change their mind).
+            if not session or session.get('state') not in ('waiting_for_quantity', 'waiting_for_confirmation'):
                 answer_callback(callback_query['id'])
                 return
             try:
@@ -2351,18 +2353,29 @@ def handle_callback_query(update):
                 answer_callback(callback_query['id'], f"សុំទោស! មានត្រឹមតែ {session['available_count']} នៅក្នុងស្តុក", True)
                 return
 
+            # If the user is already on the summary screen and re-picks the same
+            # quantity, just acknowledge — nothing to update.
+            if session.get('state') == 'waiting_for_confirmation' and session.get('quantity') == quantity:
+                answer_callback(callback_query['id'])
+                return
+
             total_price = quantity * session['price']
+            previous_summary_id = session.get('summary_message_id')
             with _data_lock:
                 session['quantity'] = quantity
                 session['total_price'] = total_price
                 session['state'] = 'waiting_for_confirmation'
+                # Clear stale id so the new summary id can be saved cleanly.
+                session.pop('summary_message_id', None)
 
             # Answer immediately before any I/O so the button feels instant
             answer_callback(callback_query['id'])
             save_sessions_async()
 
-            # Delete the quantity keyboard message
-            delete_message_async(chat_id, callback_query['message']['message_id'])
+            # Remove the previous order summary (if any) so only the latest is shown.
+            if previous_summary_id:
+                delete_message_async(chat_id, previous_summary_id)
+
             _send_order_summary(chat_id, user_id, session)
             return
 
