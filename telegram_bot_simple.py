@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Bot configuration
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-KHMER_MESSAGE = "ជ្រើសរើស Account ដើម្បីបញ្ជាទិញ"
+KHMER_MESSAGE = "ជ្រើសរើស គូប៉ុង ដើម្បីបញ្ជាទិញ"
 ADMIN_ID = 5002402843
 
 # Additional admin user IDs (loaded from Neon at startup, managed via /admin).
@@ -1508,9 +1508,9 @@ def _main_kb(uid):
     return ADMIN_REPLY_KEYBOARD if is_admin(uid) else {'remove_keyboard': True}
 
 # ── Admin settings reply-keyboard buttons ──
-BTN_ADD_ACCOUNT     = '➕ បន្ថែម Account'
+BTN_ADD_ACCOUNT     = '➕ បន្ថែម គូប៉ុង'
 BTN_DELETE_TYPE     = '🗑 លុបប្រភេទ'
-BTN_STOCK           = '📦 ស្តុក Account'
+BTN_STOCK           = '📦 ស្តុក គូប៉ុង'
 BTN_USERS           = '👥 អ្នកប្រើប្រាស់'
 BTN_BUYERS          = '📋 របាយការណ៍ទិញ'
 BTN_PAYMENT         = '💳 ឈ្មោះ Payment'
@@ -1731,7 +1731,7 @@ def _show_delete_type_menu_inline(chat_id, user_id=None):
         if len(accounts_data['account_types'].get(t, [])) > 0
     ]
     if not types:
-        send_message(chat_id, "⚠️ <b>មិនមានប្រភេទ Account ណាមួយទេ!</b>",
+        send_message(chat_id, "⚠️ <b>មិនមានប្រភេទ គូប៉ុង ណាមួយទេ!</b>",
                      parse_mode="HTML", reply_to_message_id=None)
         return
     rows = []
@@ -1755,7 +1755,7 @@ def _show_delete_type_menu_inline(chat_id, user_id=None):
             'labels': labels_map,
         }
     save_sessions_async()
-    send_message(chat_id, "🗑 <b>ជ្រើសរើសប្រភេទ Account ដែលចង់លុប៖</b>",
+    send_message(chat_id, "🗑 <b>ជ្រើសរើសប្រភេទ គូប៉ុង ដែលចង់លុប៖</b>",
                  parse_mode="HTML", reply_to_message_id=False, reply_markup=reply_keyboard)
 
 
@@ -1899,7 +1899,7 @@ def _export_stock_inline(chat_id):
         lines.append(f"Total reserved  : {total_reserved}")
 
         if not type_names:
-            send_message(chat_id, "📦 មិនមានប្រភេទ Account ឡើយទេ។",
+            send_message(chat_id, "📦 មិនមានប្រភេទ គូប៉ុង ឡើយទេ។",
                          parse_mode="HTML", reply_to_message_id=False,
                          reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
             return
@@ -1907,7 +1907,7 @@ def _export_stock_inline(chat_id):
         txt = "\n".join(lines).encode('utf-8')
         filename = f"stock_{_dt.datetime.now(_dt.timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
         files = {'document': (filename, txt, 'text/plain')}
-        caption = (f"📦 ស្តុក Account — {len(type_names)} ប្រភេទ, "
+        caption = (f"📦 ស្តុក គូប៉ុង — {len(type_names)} ប្រភេទ, "
                    f"{total_available} នៅសល់" +
                    (f", {total_reserved} កំពុងកក់ទុក" if total_reserved else ""))
         data = {'chat_id': chat_id, 'caption': caption}
@@ -1973,7 +1973,7 @@ def _start_add_account_flow(chat_id, user_id, message_id):
     save_sessions_async()
     send_message(
         chat_id,
-        "*បញ្ចូល Account សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
+        "*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
         "```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```",
         reply_to_message_id=message_id, parse_mode="Markdown",
         reply_markup=ADD_ACCOUNT_KEYBOARD
@@ -2229,7 +2229,7 @@ def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None
         if callback_query_id:
             answer_callback(
                 callback_query_id,
-                f"សូមអភ័យទោស! មានត្រឹមតែ {available} Account នៅក្នុងស្តុក",
+                f"សូមអភ័យទោស! មានត្រឹមតែ {available} គូប៉ុង នៅក្នុងស្តុក",
                 True,
             )
         else:
@@ -2395,7 +2395,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
 
                     logger.info(f"User {user_id} selected account type {account_type}, waiting for quantity input")
                 else:
-                    send_message(chat_id, f"សុំទោស! Account {account_type} អស់ស្តុកហើយ។")
+                    send_message(chat_id, f"សុំទោស! គូប៉ុង {account_type} អស់ស្តុកហើយ។")
         
         # Handle out-of-stock button clicks
         elif callback_data.startswith('out_of_stock:') or callback_data.startswith('out_of_stock_'):
@@ -2404,7 +2404,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                 account_type = _account_type_from_callback_id(callback_data[13:]) or "នេះ"
             else:
                 account_type = callback_data.replace('out_of_stock_', '')
-            send_message(chat_id, f"សូមអភ័យទោស Account {account_type} អស់ពីស្តុក 🪤")
+            send_message(chat_id, f"សូមអភ័យទោស គូប៉ុង {account_type} អស់ពីស្តុក 🪤")
 
         # Admin: delete type — step 1: show confirmation
         elif callback_data.startswith('dts:') and is_admin(user_id):
@@ -2421,9 +2421,9 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                 {'text': '🚫 បោះបង់', 'callback_data': 'dtcancel'}
             ]]}
             send_message(chat_id,
-                f"⚠️ <b>តើអ្នកពិតជាចង់លុបប្រភេទ Account នេះមែនទេ?</b>\n\n"
-                f"<blockquote>🔹 ប្រភេទ: {type_name}\n🔹 ចំនួន Account: {count}\n🔹 តម្លៃ: ${price}</blockquote>\n\n"
-                f"Account ទាំងអស់ក្នុងប្រភេទនេះនឹងត្រូវបានលុបចោលជាអចិន្ត្រៃយ៍!",
+                f"⚠️ <b>តើអ្នកពិតជាចង់លុបប្រភេទ គូប៉ុង នេះមែនទេ?</b>\n\n"
+                f"<blockquote>🔹 ប្រភេទ: {type_name}\n🔹 ចំនួន គូប៉ុង: {count}\n🔹 តម្លៃ: ${price}</blockquote>\n\n"
+                f"គូប៉ុង ទាំងអស់ក្នុងប្រភេទនេះនឹងត្រូវបានលុបចោលជាអចិន្ត្រៃយ៍!",
                 parse_mode="HTML", reply_to_message_id=None, reply_markup=keyboard)
             return
 
@@ -2443,7 +2443,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
             save_data()
             delete_message_async(chat_id, callback_query['message']['message_id'])
             send_message(chat_id,
-                f"✅ <b>បានលុបប្រភេទ Account <code>{type_name}</code> ចំនួន {count} records ដោយជោគជ័យ!</b>",
+                f"✅ <b>បានលុបប្រភេទ គូប៉ុង <code>{type_name}</code> ចំនួន {count} records ដោយជោគជ័យ!</b>",
                 parse_mode="HTML", reply_to_message_id=None)
             logger.info(f"Admin {user_id} deleted account type '{type_name}' ({count} records)")
             return
@@ -2452,7 +2452,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
         elif callback_data == 'dtcancel' and is_admin(user_id):
             answer_callback(callback_query['id'])
             delete_message_async(chat_id, callback_query['message']['message_id'])
-            send_message(chat_id, "🚫 <b>បានបោះបង់ការលុបប្រភេទ Account</b>",
+            send_message(chat_id, "🚫 <b>បានបោះបង់ការលុបប្រភេទ គូប៉ុង</b>",
                          parse_mode="HTML", reply_to_message_id=None)
             return
 
@@ -2627,7 +2627,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                     available = len(accounts_data['account_types'].get(target_type, []))
                     price = accounts_data.get('prices', {}).get(target_type, 0)
                 if available <= 0:
-                    answer_callback(callback_query['id'], f"សូមអភ័យទោស Account {target_type} អស់ពីស្តុក 🪤", True)
+                    answer_callback(callback_query['id'], f"សូមអភ័យទោស គូប៉ុង {target_type} អស់ពីស្តុក 🪤", True)
                     return
                 with _data_lock:
                     user_sessions[user_id] = {
@@ -2816,9 +2816,9 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                         'is_persistent': True,
                     }
                     send_message(chat_id,
-                        f"⚠️ <b>តើអ្នកពិតជាចង់លុបប្រភេទ Account នេះមែនទេ?</b>\n\n"
-                        f"<blockquote>🔹 ប្រភេទ: {html.escape(type_name)}\n🔹 ចំនួន Account: {count}\n🔹 តម្លៃ: ${price}</blockquote>\n\n"
-                        f"Account ទាំងអស់ក្នុងប្រភេទនេះនឹងត្រូវបានលុបចោលជាអចិន្ត្រៃយ៍!",
+                        f"⚠️ <b>តើអ្នកពិតជាចង់លុបប្រភេទ គូប៉ុង នេះមែនទេ?</b>\n\n"
+                        f"<blockquote>🔹 ប្រភេទ: {html.escape(type_name)}\n🔹 ចំនួន គូប៉ុង: {count}\n🔹 តម្លៃ: ${price}</blockquote>\n\n"
+                        f"គូប៉ុង ទាំងអស់ក្នុងប្រភេទនេះនឹងត្រូវបានលុបចោលជាអចិន្ត្រៃយ៍!",
                         parse_mode="HTML", reply_to_message_id=False,
                         reply_markup=confirm_kb)
                     return
@@ -2845,7 +2845,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                     ]
                     save_data()
                     send_message(chat_id,
-                        f"✅ <b>បានលុបប្រភេទ Account <code>{html.escape(type_name)}</code> ចំនួន {count} records ដោយជោគជ័យ!</b>",
+                        f"✅ <b>បានលុបប្រភេទ គូប៉ុង <code>{html.escape(type_name)}</code> ចំនួន {count} records ដោយជោគជ័យ!</b>",
                         parse_mode="HTML", reply_to_message_id=False,
                         reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
                     logger.info(f"Admin {user_id} deleted account type '{type_name}' ({count} records)")
@@ -2855,7 +2855,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                         if user_id in user_sessions:
                             del user_sessions[user_id]
                     save_sessions_async()
-                    send_message(chat_id, "🚫 <b>បានបោះបង់ការលុបប្រភេទ Account</b>",
+                    send_message(chat_id, "🚫 <b>បានបោះបង់ការលុបប្រភេទ គូប៉ុង</b>",
                                  parse_mode="HTML", reply_to_message_id=False,
                                  reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
                     return
@@ -3050,7 +3050,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                             session['state'] = 'waiting_for_account_type'
                         save_sessions_async()
                         count = len(accounts)
-                        send_message(chat_id, f"*បានបញ្ចូល Account ចំនួន {count}\n\nសូមបញ្ចូលប្រភេទ Account៖*", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
+                        send_message(chat_id, f"*បានបញ្ចូល គូប៉ុង ចំនួន {count}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     else:
                         send_message(chat_id, "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ! សូមបញ្ចូលតាមទម្រង់៖*\n\n```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     return
@@ -3064,10 +3064,10 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                     save_sessions_async()
                     if existing_price is not None:
                         send_message(chat_id,
-                            f"*ប្រភេទ Account `{account_type_input}` មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\nតម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម Account បាន៖*",
+                            f"*ប្រភេទ គូប៉ុង `{account_type_input}` មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\nតម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម គូប៉ុង បាន៖*",
                             reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     else:
-                        send_message(chat_id, f"*សូមដាក់តម្លៃក្នុងប្រភេទ Account {account_type_input}*", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
+                        send_message(chat_id, f"*សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {account_type_input}*", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     return
                 
                 elif session['state'] == 'waiting_for_price':
@@ -3137,7 +3137,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                         save_sessions_async()
 
                         # Send confirmation
-                        send_message(chat_id, f"*✅ បានបញ្ចូល Account ដោយជោគជ័យ*\n\n```\n🔹 ចំនួន: {count}\n\n🔹 ប្រភេទ: {account_type}\n\n🔹 តម្លៃ: {price}$\n```", reply_to_message_id=message_id, parse_mode="Markdown")
+                        send_message(chat_id, f"*✅ បានបញ្ចូល គូប៉ុង ដោយជោគជ័យ*\n\n```\n🔹 ចំនួន: {count}\n\n🔹 ប្រភេទ: {account_type}\n\n🔹 តម្លៃ: {price}$\n```", reply_to_message_id=message_id, parse_mode="Markdown")
 
                         logger.info(f"Admin {user_id} added {count} accounts of type {account_type} with price ${price}")
 
@@ -3210,11 +3210,11 @@ def deliver_accounts(chat_id, user_id, session, payment_data=None, user_name='')
 
     if delivered_accounts is None:
         if available_count is None:
-            send_message(chat_id, f"❌ *មានបញ្ហា!*\n\nគ្មាន Account ប្រភេទ {account_type} ក្នុងស្តុក។",
+            send_message(chat_id, f"❌ *មានបញ្ហា!*\n\nគ្មាន គូប៉ុង ប្រភេទ {account_type} ក្នុងស្តុក។",
                          parse_mode="Markdown")
         else:
             send_message(chat_id,
-                         f"❌ *មានបញ្ហា!*\n\nសុំទោស! មានត្រឹមតែ {available_count} Accounts នៅក្នុងស្តុក។",
+                         f"❌ *មានបញ្ហា!*\n\nសុំទោស! មានត្រឹមតែ {available_count} គូប៉ុង នៅក្នុងស្តុក។",
                          parse_mode="Markdown")
         return
 
@@ -3224,7 +3224,7 @@ def deliver_accounts(chat_id, user_id, session, payment_data=None, user_name='')
     accounts_message = f'<tg-emoji emoji-id="5436040291507247633">🎉</tg-emoji> <b>ការទិញបានបញ្ជាក់ដោយជោគជ័យ</b>\n\n'
     accounts_message += f"<blockquote>🔹 ប្រភេទ: {account_type}\n"
     accounts_message += f"🔹 ចំនួន: {quantity}</blockquote>\n\n"
-    accounts_message += "<b>Accounts របស់អ្នក៖</b>\n\n"
+    accounts_message += "<b>គូប៉ុង របស់អ្នក៖</b>\n\n"
     for account in delivered_accounts:
         if 'email' in account:
             accounts_message += f"{account['email']}\n"
