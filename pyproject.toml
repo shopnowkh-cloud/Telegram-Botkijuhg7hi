@@ -9,6 +9,5 @@ dependencies = [
     "python-telegram-bot>=22.3",
     "qrcode>=8.2",
     "requests>=2.32.4",
-    "telegram>=0.0.1",
     "urllib3>=2.5.0",
 ]
