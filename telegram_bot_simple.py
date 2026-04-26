@@ -1312,7 +1312,6 @@ BTN_CHANNEL         = '📢 Channel ID'
 BTN_ADMINS          = '👑 គ្រប់គ្រង Admin'
 BTN_MAINTENANCE     = '🛠 Maintenance Mode'
 BTN_BROADCAST       = '📢 ផ្សាយព័ត៌មាន'
-BTN_BACK_HOME       = '🏠 ត្រឡប់ទៅម៉ឺនុយដើម'
 BTN_BACK_SETTINGS   = '↩️ ត្រឡប់ទៅកំណត់'
 
 BTN_PAYMENT_EDIT    = '✏️ ប្តូរឈ្មោះ Payment'
@@ -1345,7 +1344,6 @@ ADMIN_SETTINGS_REPLY_KEYBOARD = {
         [{'text': BTN_PAYMENT}, {'text': BTN_BAKONG}],
         [{'text': BTN_CHANNEL}, {'text': BTN_ADMINS}],
         [{'text': BTN_BROADCAST}, {'text': BTN_MAINTENANCE}],
-        [{'text': BTN_BACK_HOME}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1354,7 +1352,7 @@ ADMIN_SETTINGS_REPLY_KEYBOARD = {
 PAYMENT_SUBMENU_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_PAYMENT_EDIT}],
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1363,7 +1361,7 @@ PAYMENT_SUBMENU_KEYBOARD = {
 BAKONG_SUBMENU_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_BAKONG_EDIT}],
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1372,7 +1370,7 @@ BAKONG_SUBMENU_KEYBOARD = {
 CHANNEL_SUBMENU_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_CHANNEL_EDIT}, {'text': BTN_CHANNEL_CLEAR}],
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1381,7 +1379,7 @@ CHANNEL_SUBMENU_KEYBOARD = {
 ADMINS_SUBMENU_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_ADMIN_ADD}, {'text': BTN_ADMIN_REMOVE}],
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1390,7 +1388,7 @@ ADMINS_SUBMENU_KEYBOARD = {
 MAINTENANCE_SUBMENU_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_MAINT_ON}, {'text': BTN_MAINT_OFF}],
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1399,7 +1397,6 @@ MAINTENANCE_SUBMENU_KEYBOARD = {
 CANCEL_INPUT_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_CANCEL_INPUT}],
-        [{'text': BTN_BACK_HOME}],
     ],
     'resize_keyboard': True,
     'one_time_keyboard': False,
@@ -1408,7 +1405,7 @@ CANCEL_INPUT_KEYBOARD = {
 
 ADD_ACCOUNT_KEYBOARD = {
     'keyboard': [
-        [{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}],
+        [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
     'is_persistent': True
@@ -1419,7 +1416,7 @@ ADD_ACCOUNT_KEYBOARD = {
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
-    BTN_BACK_HOME, BTN_BACK_SETTINGS,
+    BTN_BACK_SETTINGS,
     BTN_PAYMENT_EDIT, BTN_BAKONG_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR,
     BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
@@ -1451,7 +1448,7 @@ def _prompt_admin_input(chat_id, user_id, key, prompt_text):
     save_sessions_async()
     send_message(
         chat_id,
-        prompt_text + "\n\n<i>ចុច 🚫 បោះបង់ ឬ 🏠 ត្រឡប់ទៅម៉ឺនុយដើម ដើម្បីបោះបង់</i>",
+        prompt_text + "\n\n<i>ចុច 🚫 បោះបង់ ដើម្បីបោះបង់</i>",
         parse_mode="HTML",
         reply_to_message_id=False,
         reply_markup=CANCEL_INPUT_KEYBOARD
@@ -1474,7 +1471,7 @@ def _show_users_list_inline(chat_id):
         logger.error(f"Failed to load known users: {e}")
         rows = []
     back_keyboard = {
-        'keyboard': [[{'text': BTN_BACK_SETTINGS}, {'text': BTN_BACK_HOME}]],
+        'keyboard': [[{'text': BTN_BACK_SETTINGS}]],
         'resize_keyboard': True,
         'is_persistent': True,
     }
@@ -1699,15 +1696,6 @@ def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
                 del user_sessions[user_id]
         save_sessions_async()
         send_message(chat_id, "🚫 បានបោះបង់ការកំណត់", reply_to_message_id=False, reply_markup=_main_kb(user_id))
-        return True
-
-    # 🏠 button: cancel input and return to main menu
-    if raw == BTN_BACK_HOME:
-        with _data_lock:
-            if user_id in user_sessions:
-                del user_sessions[user_id]
-        save_sessions_async()
-        send_message(chat_id, "🏠 ម៉ឺនុយដើម", reply_to_message_id=False, reply_markup=_main_kb(user_id))
         return True
 
     # ↩️ Back-to-settings button: cancel input and return to settings menu
@@ -2518,15 +2506,6 @@ def handle_message(update):
             btn = text.strip()
 
             # ── Top-level settings menu actions ──
-            if btn == BTN_BACK_HOME:
-                # Cancel any in-progress admin session (e.g. add-account flow)
-                if user_id in user_sessions:
-                    with _data_lock:
-                        del user_sessions[user_id]
-                    save_sessions_async()
-                send_message(chat_id, "🏠 ម៉ឺនុយដើម", reply_to_message_id=False,
-                             reply_markup=_main_kb(user_id))
-                return
             if btn == BTN_BACK_SETTINGS:
                 # Cancel any in-progress admin session before returning to settings
                 if user_id in user_sessions:
