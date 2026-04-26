@@ -65,7 +65,7 @@ PAYMENT_NAME = "RADY"
 MAINTENANCE_MODE = False
 
 # QR Code expiry timeout (seconds)
-PAYMENT_TIMEOUT_SECONDS = 3 * 60
+PAYMENT_TIMEOUT_SECONDS = 2 * 60
 
 # ── Manual KHQR builder (fallback when library generates invalid strings) ──
 def _crc16_ccitt(data: str) -> str:
