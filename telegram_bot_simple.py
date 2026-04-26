@@ -1478,7 +1478,7 @@ def show_account_selection(chat_id):
             'callback_data': f"buy:{_type_callback_id(account_type)}"
         }])
     inline_keyboard = {'inline_keyboard': inline_rows}
-    send_message(chat_id, "<b>សូមជ្រើសរើស Account ដើម្បីទិញ៖</b>",
+    send_message(chat_id, "<b>សូមជ្រើសរើសគូប៉ុងដើម្បីទិញ៖</b>",
                  reply_to_message_id=False, reply_markup=inline_keyboard, parse_mode="HTML")
 
 
