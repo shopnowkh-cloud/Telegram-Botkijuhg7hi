@@ -2646,6 +2646,18 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                 answer_callback(callback_query['id'])
                 return
 
+            # If a QR has already been generated for this user, refuse to
+            # spawn a second one — the buyer must finish the current order
+            # (or use /cancel) first. Prevents double-tap from creating
+            # duplicate KHQRs and double-charging stock.
+            if _has_active_purchase(user_id):
+                answer_callback(
+                    callback_query['id'],
+                    "សូមបញ្ចប់ការទិញបច្ចុប្បន្នជាមុនសិន ឬចុច /cancel",
+                    True,
+                )
+                return
+
             session = user_sessions.get(user_id)
 
             # If the click is for a different account type than the active
