@@ -720,6 +720,27 @@ def get_pending_payment(user_id):
         logger.error(f"Failed to get pending payment: {e}")
     return None
 
+def _reset_user_session(user_id, save=True):
+    """Atomically clear a user's in-memory session, release any reserved
+    accounts back to the stock pool, and drop any persisted pending-payment
+    row. Safe to call when nothing exists.
+
+    Use this anywhere a user resets/abandons a flow (/start, picking a new
+    account type, etc.) so reservations don't leak as ghost stock.
+    """
+    with _data_lock:
+        session = user_sessions.pop(user_id, None)
+    target = session if (session and session.get('reserved_accounts')) else None
+    if target is None:
+        target = get_pending_payment(user_id)
+    if target:
+        _release_reserved_accounts(target)
+    delete_pending_payment_async(user_id)
+    if save and session is not None:
+        save_sessions_async()
+    return session
+
+
 def _release_reserved_accounts(session):
     """Return a session's reserved accounts to the available pool.
 
@@ -2171,8 +2192,12 @@ def handle_callback_query(update):
                     price = accounts_data['prices'].get(account_type, 0)
                 
                 if count > 0:
-                    # Always allow user to select account type (reset any existing session)
+                    # Always allow user to select account type. Release any
+                    # in-flight reservation first so stock isn't leaked.
+                    _reset_user_session(user_id, save=False)
                     with _data_lock:
+                        accounts = accounts_data['account_types'][account_type]
+                        count = len(accounts)
                         user_sessions[user_id] = {
                             'state': 'waiting_for_quantity',
                             'account_type': account_type,
@@ -2428,6 +2453,9 @@ def handle_callback_query(update):
                 if target_type not in accounts_data.get('account_types', {}):
                     answer_callback(callback_query['id'], 'ប្រភេទនេះមិនមានទៀតហើយ។', True)
                     return
+                # Release any reservations held by the previous session so
+                # stock isn't leaked when the user switches account types.
+                _reset_user_session(user_id, save=False)
                 with _data_lock:
                     available = len(accounts_data['account_types'].get(target_type, []))
                     price = accounts_data.get('prices', {}).get(target_type, 0)
@@ -2562,12 +2590,7 @@ def handle_message(update):
 
         if text.strip() == '/start':
             logger.info(f"User {user_id} triggered account selection interface")
-            with _data_lock:
-                had_session = user_id in user_sessions
-                if had_session:
-                    del user_sessions[user_id]
-            if had_session:
-                save_sessions_async()
+            _reset_user_session(user_id)
             show_account_selection_local()
             return
 
