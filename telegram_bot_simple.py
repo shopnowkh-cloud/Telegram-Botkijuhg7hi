@@ -3069,9 +3069,10 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                 _notify_must_finish_order(chat_id)
                 return
 
-            # Quantity must be chosen via inline buttons only — ignore text input
-            if session['state'] == 'waiting_for_quantity':
-                return
+            # Quantity must be chosen via the inline buttons. If the user
+            # types something while at this step, just let the message fall
+            # through to the normal handlers below (e.g. show the buy menu)
+            # so the bot still feels responsive.
 
         # Handle non-admin users
         if not is_admin(user_id):
