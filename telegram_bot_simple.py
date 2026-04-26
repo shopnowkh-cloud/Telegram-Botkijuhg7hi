@@ -739,22 +739,14 @@ def get_pending_payment(user_id):
     return None
 
 def _has_active_purchase(user_id):
-    """Return True if the user has an in-flight purchase that must be
-    completed (or cancelled with /cancel) before a new order can be started.
+    """Return True only if the user has a QR/payment-pending order that must
+    be completed (or cancelled with /cancel) before a new order can start.
 
-    Covers both the quantity-selection step and the QR/payment-pending step.
-    Stale quantity-selection sessions older than PAYMENT_TIMEOUT_SECONDS are
-    auto-released so a buyer who never picks a quantity isn't locked out
-    forever.
+    The quantity-selection step does NOT count — at that point no QR has
+    been generated yet, so the buyer can freely switch coupon types.
     """
     try:
         sess = user_sessions.get(user_id)
-        if sess and sess.get('state') == 'waiting_for_quantity':
-            started_at = sess.get('started_at') or 0
-            if started_at and (time.time() - started_at) > PAYMENT_TIMEOUT_SECONDS:
-                _reset_user_session(user_id)
-                return False
-            return True
         if sess and sess.get('state') == 'payment_pending':
             return True
         if get_pending_payment(user_id):
