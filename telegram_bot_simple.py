@@ -1239,26 +1239,73 @@ def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
                     return
                 if time.time() - started_at < PAYMENT_TIMEOUT_SECONDS:
                     continue
-                delete_message_async(chat_id, msg_id)
-                expired_session = None
-                with _data_lock:
-                    if (user_id in user_sessions
-                            and user_sessions[user_id].get('md5_hash') == md5_hash):
-                        expired_session = user_sessions.pop(user_id)
-                _release_reserved_accounts(expired_session or get_pending_payment(user_id))
-                save_sessions_async()
-                delete_pending_payment_async(user_id)
-                send_message(
-                    chat_id,
-                    "⌛ <b>QR Code បានផុតកំណត់</b>\n\nសូមបង្កើតការទិញម្តងទៀត។",
-                    parse_mode="HTML",
-                    reply_to_message_id=False,
-                )
-                try:
-                    show_account_selection(chat_id)
-                except Exception as e:
-                    logger.warning(f"show_account_selection after expiry failed: {e}")
-                return
+                # Serialize with check_payment / cancel_purchase so we don't
+                # race the user clicking right at the deadline.
+                with _user_lock(user_id):
+                    with _data_lock:
+                        sess_now = user_sessions.get(user_id)
+                        still_active = bool(
+                            sess_now
+                            and sess_now.get('md5_hash') == md5_hash
+                            and sess_now.get('state') == 'payment_pending'
+                        )
+                    if not still_active:
+                        return
+
+                    # Final auto-check: maybe the buyer paid in the last few
+                    # seconds. If so, deliver instead of expiring.
+                    try:
+                        is_paid, payment_data = check_payment_status(md5_hash)
+                    except Exception as e:
+                        logger.warning(f"Auto-check payment failed for user {user_id}: {e}")
+                        is_paid, payment_data = False, None
+
+                    if is_paid:
+                        info = fetch_user_info(user_id) or {}
+                        user_name = (
+                            f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
+                        )
+                        delivered_session = None
+                        with _data_lock:
+                            if (user_id in user_sessions
+                                    and user_sessions[user_id].get('md5_hash') == md5_hash):
+                                delivered_session = user_sessions[user_id]
+                        if delivered_session is None:
+                            return
+                        try:
+                            deliver_accounts(
+                                chat_id, user_id, delivered_session,
+                                payment_data=payment_data, user_name=user_name,
+                            )
+                            delete_pending_payment_async(user_id)
+                            save_sessions_async()
+                            logger.info(
+                                f"Auto-check on QR expiry confirmed payment for user {user_id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Auto-deliver after auto-check failed: {e}")
+                        return
+
+                    delete_message_async(chat_id, msg_id)
+                    expired_session = None
+                    with _data_lock:
+                        if (user_id in user_sessions
+                                and user_sessions[user_id].get('md5_hash') == md5_hash):
+                            expired_session = user_sessions.pop(user_id)
+                    _release_reserved_accounts(expired_session or get_pending_payment(user_id))
+                    save_sessions_async()
+                    delete_pending_payment_async(user_id)
+                    send_message(
+                        chat_id,
+                        "⌛ <b>QR Code បានផុតកំណត់</b>\n\nសូមបង្កើតការទិញម្តងទៀត។",
+                        parse_mode="HTML",
+                        reply_to_message_id=False,
+                    )
+                    try:
+                        show_account_selection(chat_id)
+                    except Exception as e:
+                        logger.warning(f"show_account_selection after expiry failed: {e}")
+                    return
         except Exception as e:
             logger.error(f"QR expiry thread failed: {e}")
     threading.Thread(target=run, daemon=True).start()
