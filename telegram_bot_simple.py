@@ -2232,8 +2232,6 @@ def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None
                 f"សូមអភ័យទោស! មានត្រឹមតែ {available} គូប៉ុង នៅក្នុងស្តុក",
                 True,
             )
-        else:
-            send_message(chat_id, f"សុំទោស! មានត្រឹមតែ {available} នៅក្នុងស្តុក")
         with _data_lock:
             if user_id in user_sessions:
                 del user_sessions[user_id]
@@ -2995,28 +2993,9 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                 show_account_selection(chat_id)
                 return
 
-            # Handle quantity input for purchase — go straight to QR payment
+            # Quantity must be chosen via inline buttons only — ignore text input
             if session['state'] == 'waiting_for_quantity':
-                try:
-                    quantity = int(text.strip())
-                    if quantity <= 0:
-                        send_message(chat_id, "សូមបញ្ចូលចំនួនធំជាង 0")
-                        return
-
-                    if quantity > session['available_count']:
-                        send_message(chat_id, f"សុំទោស! មានត្រឹមតែ {session['available_count']} នៅក្នុងស្តុក")
-                        return
-
-                    total_price = quantity * session['price']
-                    with _data_lock:
-                        session['quantity'] = quantity
-                        session['total_price'] = total_price
-                    _start_payment_for_session(chat_id, user_id, session)
-                    return
-
-                except ValueError:
-                    send_message(chat_id, "សូមបញ្ចូលចំនួនជាលេខ (ឧទាហរណ៍: 1, 2, 3)")
-                    return
+                return
 
         # Handle non-admin users
         if not is_admin(user_id):
