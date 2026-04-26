@@ -599,6 +599,56 @@ def resume_scheduled_deletions():
     except Exception as e:
         logger.error(f"Failed to resume scheduled deletions: {e}")
 
+def cleanup_expired_pending_payments():
+    """On startup, release reservations from any pending payments that already
+    timed out while the bot was offline.
+
+    The QR-timeout thread can't run across a restart, so without this, emails
+    reserved for an order whose QR has expired would stay locked forever and
+    never be sold.
+    """
+    try:
+        r = _neon_query(
+            "SELECT user_id, account_type, reserved_accounts "
+            "FROM bot_pending_payments "
+            "WHERE created_at + ($1 || ' seconds')::interval < NOW()",
+            [str(PAYMENT_TIMEOUT_SECONDS)],
+        )
+        rows = r.get('rows', []) or []
+        if not rows:
+            return
+        released_count = 0
+        for row in rows:
+            try:
+                reserved = row.get('reserved_accounts') or []
+                if isinstance(reserved, str):
+                    try:
+                        reserved = json.loads(reserved)
+                    except Exception:
+                        reserved = []
+                fake_session = {
+                    'account_type': row.get('account_type'),
+                    'reserved_accounts': reserved,
+                }
+                if reserved:
+                    _release_reserved_accounts(fake_session)
+                    released_count += len(reserved)
+                # Drop the stale record either way.
+                user_id = row.get('user_id')
+                if user_id is not None:
+                    _neon_query(
+                        "DELETE FROM bot_pending_payments WHERE user_id = $1",
+                        [str(user_id)],
+                    )
+            except Exception as e:
+                logger.warning(f"Bad expired pending payment row {row}: {e}")
+        logger.info(
+            f"Cleaned up {len(rows)} expired pending payment(s); "
+            f"released {released_count} reserved account(s) back to stock"
+        )
+    except Exception as e:
+        logger.error(f"Failed to clean up expired pending payments: {e}")
+
 def save_pending_payment(user_id, chat_id, session):
     """Save a pending payment to Neon DB so it persists across sessions."""
     try:
@@ -3196,6 +3246,10 @@ def main():
     # Re-arm any scheduled message deletions from the DB so a cold restart
     # doesn't leak un-deleted messages.
     resume_scheduled_deletions()
+
+    # Release any reservations whose QR already expired while the bot was
+    # offline, so locked-up emails return to the available pool.
+    cleanup_expired_pending_payments()
 
     # Delete any active webhook so polling mode works without 409 conflicts
     try:
