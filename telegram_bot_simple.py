@@ -644,6 +644,13 @@ def cleanup_expired_pending_payments():
                         reserved = json.loads(reserved)
                     except Exception:
                         reserved = []
+                user_id = row.get('user_id')
+                # Defensive: if any of these "reserved" emails were actually
+                # delivered to the buyer (recorded in purchase history), do
+                # NOT release them back to stock — that would let us sell the
+                # same email a second time. Filter them out.
+                if reserved and user_id is not None:
+                    reserved = _filter_out_already_sold(user_id, reserved)
                 fake_session = {
                     'account_type': row.get('account_type'),
                     'reserved_accounts': reserved,
@@ -652,7 +659,6 @@ def cleanup_expired_pending_payments():
                     _release_reserved_accounts(fake_session)
                     released_count += len(reserved)
                 # Drop the stale record either way.
-                user_id = row.get('user_id')
                 if user_id is not None:
                     _neon_query(
                         "DELETE FROM bot_pending_payments WHERE user_id = $1",
@@ -666,6 +672,61 @@ def cleanup_expired_pending_payments():
         )
     except Exception as e:
         logger.error(f"Failed to clean up expired pending payments: {e}")
+
+
+def _filter_out_already_sold(user_id, reserved):
+    """Return the subset of reserved accounts that were NOT already delivered.
+
+    Looks at recent purchase history for this user and drops any reserved
+    item whose email/phone identifier already appears as a delivered account.
+    Used by the expired-payment sweeper so a crash between delivery and the
+    pending-row delete can never cause a sold email to re-enter stock.
+    """
+    try:
+        rows = _neon_query(
+            "SELECT accounts FROM bot_purchase_history WHERE user_id = $1 "
+            "ORDER BY purchased_at DESC LIMIT 50",
+            [str(user_id)],
+        ).get('rows', []) or []
+    except Exception as e:
+        logger.warning(f"_filter_out_already_sold history lookup failed: {e}")
+        return reserved
+
+    sold_keys = set()
+    for r in rows:
+        accs = r.get('accounts') or []
+        if isinstance(accs, str):
+            try:
+                accs = json.loads(accs)
+            except Exception:
+                accs = []
+        for a in accs:
+            if not isinstance(a, dict):
+                continue
+            key = a.get('email') or a.get('phone')
+            if key:
+                sold_keys.add(str(key))
+
+    if not sold_keys:
+        return reserved
+
+    kept = []
+    dropped = 0
+    for a in reserved:
+        if not isinstance(a, dict):
+            kept.append(a)
+            continue
+        key = a.get('email') or a.get('phone')
+        if key and str(key) in sold_keys:
+            dropped += 1
+            continue
+        kept.append(a)
+    if dropped:
+        logger.info(
+            f"Skipped re-stocking {dropped} reserved account(s) for user {user_id} "
+            f"because they were already delivered (purchase history match)"
+        )
+    return kept
 
 def start_pending_payment_sweeper(interval_seconds=60):
     """Run cleanup_expired_pending_payments periodically in a background thread.
@@ -3331,7 +3392,18 @@ def deliver_accounts(chat_id, user_id, session, payment_data=None, user_name='')
                          parse_mode="Markdown")
         return
 
+    # Persist the deducted stock immediately so a crash here can never
+    # un-deduct the sold emails on the next restart.
     save_data()
+    # Drop the pending-payment row SYNCHRONOUSLY (not async) the instant the
+    # accounts are committed to be delivered. Otherwise a crash between this
+    # point and the async delete below would leave a stale row that the
+    # expired-payment sweeper would later "release" — putting already-sold
+    # emails back into stock and causing them to be sold a second time.
+    try:
+        delete_pending_payment(user_id)
+    except Exception as e:
+        logger.error(f"Failed to delete pending payment for user {user_id}: {e}")
     save_purchase_history_async(user_id, account_type, quantity, session.get('total_price', 0), delivered_accounts)
 
     accounts_message = f'<tg-emoji emoji-id="5436040291507247633">🎉</tg-emoji> <b>ការទិញបានបញ្ជាក់ដោយជោគជ័យ</b>\n\n'
