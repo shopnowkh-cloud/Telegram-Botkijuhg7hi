@@ -649,6 +649,23 @@ def cleanup_expired_pending_payments():
     except Exception as e:
         logger.error(f"Failed to clean up expired pending payments: {e}")
 
+def start_pending_payment_sweeper(interval_seconds=60):
+    """Run cleanup_expired_pending_payments periodically in a background thread.
+
+    Belt-and-suspenders for cases where a per-order QR-timeout thread crashed
+    silently or never got to clean up. Idempotent: rows that aren't expired yet
+    are skipped, so it's safe to run frequently.
+    """
+    def _loop():
+        while True:
+            try:
+                time.sleep(interval_seconds)
+                cleanup_expired_pending_payments()
+            except Exception as e:
+                logger.warning(f"Pending-payment sweeper iteration failed: {e}")
+    threading.Thread(target=_loop, daemon=True, name="pending-sweeper").start()
+    logger.info(f"Pending-payment sweeper started (every {interval_seconds}s)")
+
 def save_pending_payment(user_id, chat_id, session):
     """Save a pending payment to Neon DB so it persists across sessions."""
     try:
@@ -3250,6 +3267,10 @@ def main():
     # Release any reservations whose QR already expired while the bot was
     # offline, so locked-up emails return to the available pool.
     cleanup_expired_pending_payments()
+
+    # Keep doing the same sweep every minute to catch any reservations that
+    # the per-order timeout thread missed (e.g. crashed thread, dropped DB call).
+    start_pending_payment_sweeper(60)
 
     # Delete any active webhook so polling mode works without 409 conflicts
     try:
