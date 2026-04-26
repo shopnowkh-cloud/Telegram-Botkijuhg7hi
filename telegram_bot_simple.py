@@ -2861,8 +2861,6 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                 if mid:
                     delete_message_async(chat_id, mid)
             _reset_user_session(user_id)
-            send_message(chat_id, "🚫 <b>បានបោះបង់ការបញ្ជាទិញ</b>",
-                         parse_mode="HTML", reply_to_message_id=False)
             show_account_selection_local()
             return
 
