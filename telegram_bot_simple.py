@@ -2276,8 +2276,6 @@ def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None
         amount = session['total_price']
         photo_resp = send_photo_bytes(
             chat_id, img_bytes,
-            caption=_qr_caption(amount),
-            parse_mode='HTML',
             reply_markup=CHECK_PAYMENT_KEYBOARD,
         )
         if photo_resp and photo_resp.get('result'):
