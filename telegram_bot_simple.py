@@ -1472,7 +1472,7 @@ def show_account_selection(chat_id):
 
     inline_rows = []
     for account_type, count, price in available:
-        label = f"{account_type} {price}$ - មានក្នុងស្តុក {count}"
+        label = f"{account_type} – មានក្នុងស្តុក {count}"
         inline_rows.append([{
             'text': label,
             'callback_data': f"buy:{_type_callback_id(account_type)}"
