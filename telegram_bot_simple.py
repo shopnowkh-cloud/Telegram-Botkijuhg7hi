@@ -2728,8 +2728,29 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
 
         # Handle cancel purchase
         elif callback_data == 'cancel_purchase':
-            answer_callback(callback_query['id'])
             session = user_sessions.get(user_id) or get_pending_payment(user_id)
+
+            # Before cancelling, double-check whether the payment has actually
+            # arrived. If the buyer paid (and the cancel button just beat the
+            # poller), honour the payment and deliver the accounts instead of
+            # releasing the reservation.
+            md5 = session.get('md5_hash') if session else None
+            if md5:
+                try:
+                    is_paid, payment_data = check_payment_status(md5)
+                except Exception as e:
+                    logger.error(f"cancel_purchase: payment check failed: {e}")
+                    is_paid, payment_data = False, None
+                if is_paid:
+                    answer_callback(callback_query['id'], '✅ បានទទួលការបង់ប្រាក់!')
+                    user_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                    deliver_accounts(chat_id, user_id, session,
+                                     payment_data=payment_data, user_name=user_name)
+                    delete_pending_payment_async(user_id)
+                    save_sessions_async()
+                    return
+
+            answer_callback(callback_query['id'])
             photo_message_id = session.get('photo_message_id') if session else None
             if photo_message_id:
                 delete_message_async(chat_id, photo_message_id)
