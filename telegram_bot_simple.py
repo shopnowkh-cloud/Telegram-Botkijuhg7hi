@@ -1174,25 +1174,21 @@ def answer_callback(callback_query_id, text=None, show_alert=False):
         logger.warning(f"Failed to answer callback quickly: {e}")
         return None
 
-def _qr_caption(amount, seconds_left):
-    """Build the QR caption with the live countdown remaining."""
-    if seconds_left < 0:
-        seconds_left = 0
-    minutes = seconds_left // 60
-    seconds = seconds_left % 60
-    return (
-        f"💵 <b>ចំនួនទឹកប្រាក់៖</b> ${amount}\n"
-        f"⏳ <b>QR នឹងផុតកំណត់ក្នុង៖</b> {minutes:02d}:{seconds:02d}"
-    )
+def _qr_caption(amount):
+    """Build the QR caption (no live countdown — QR auto-expires after 2 minutes)."""
+    return f"💵 <b>ចំនួនទឹកប្រាក់៖</b> ${amount}"
 
 
-def _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at):
-    """Background thread: refresh QR caption every 30s and expire after timeout."""
+def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
+    """Background thread: wait until the QR's 2-minute lifetime ends, then
+    expire the session and clean up. No per-second updates."""
     def run():
         try:
             while True:
-                elapsed = int(time.time() - started_at)
+                elapsed = time.time() - started_at
                 remaining = PAYMENT_TIMEOUT_SECONDS - elapsed
+                if remaining > 0:
+                    time.sleep(min(remaining, 5))
                 with _data_lock:
                     sess = user_sessions.get(user_id)
                     still_active = bool(
@@ -1202,41 +1198,30 @@ def _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at):
                     )
                 if not still_active:
                     return
-                if remaining <= 0:
-                    delete_message_async(chat_id, msg_id)
-                    expired_session = None
-                    with _data_lock:
-                        if (user_id in user_sessions
-                                and user_sessions[user_id].get('md5_hash') == md5_hash):
-                            expired_session = user_sessions.pop(user_id)
-                    # Return the held emails to the pool so other buyers can purchase them.
-                    _release_reserved_accounts(expired_session or get_pending_payment(user_id))
-                    save_sessions_async()
-                    delete_pending_payment_async(user_id)
-                    send_message(
-                        chat_id,
-                        "⌛ <b>QR Code បានផុតកំណត់</b>\n\nសូមបង្កើតការទិញម្តងទៀត។",
-                        parse_mode="HTML",
-                        reply_to_message_id=False,
-                    )
-                    try:
-                        show_account_selection(chat_id)
-                    except Exception as e:
-                        logger.warning(f"show_account_selection after expiry failed: {e}")
-                    return
-                edit_message_caption(
-                    chat_id, msg_id,
-                    _qr_caption(amount, remaining),
-                    reply_markup=CHECK_PAYMENT_KEYBOARD,
+                if time.time() - started_at < PAYMENT_TIMEOUT_SECONDS:
+                    continue
+                delete_message_async(chat_id, msg_id)
+                expired_session = None
+                with _data_lock:
+                    if (user_id in user_sessions
+                            and user_sessions[user_id].get('md5_hash') == md5_hash):
+                        expired_session = user_sessions.pop(user_id)
+                _release_reserved_accounts(expired_session or get_pending_payment(user_id))
+                save_sessions_async()
+                delete_pending_payment_async(user_id)
+                send_message(
+                    chat_id,
+                    "⌛ <b>QR Code បានផុតកំណត់</b>\n\nសូមបង្កើតការទិញម្តងទៀត។",
+                    parse_mode="HTML",
+                    reply_to_message_id=False,
                 )
-                # Sleep until the next whole-second boundary from started_at
-                # so the countdown ticks exactly every 1 second regardless of
-                # how long the API call above took.
-                next_tick = started_at + (elapsed + 1)
-                sleep_time = max(0, next_tick - time.time())
-                time.sleep(sleep_time)
+                try:
+                    show_account_selection(chat_id)
+                except Exception as e:
+                    logger.warning(f"show_account_selection after expiry failed: {e}")
+                return
         except Exception as e:
-            logger.error(f"QR countdown thread failed: {e}")
+            logger.error(f"QR expiry thread failed: {e}")
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -2113,7 +2098,7 @@ def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None
         amount = session['total_price']
         photo_resp = send_photo_bytes(
             chat_id, img_bytes,
-            caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
+            caption=_qr_caption(amount),
             parse_mode='HTML',
             reply_markup=CHECK_PAYMENT_KEYBOARD,
         )
@@ -2121,7 +2106,7 @@ def _start_payment_for_session(chat_id, user_id, session, callback_query_id=None
             msg_id = photo_resp['result']['message_id']
             session['photo_message_id'] = msg_id
             session['qr_message_id'] = msg_id
-            _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
+            _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at)
         save_sessions_async()
         save_pending_payment_async(user_id, chat_id, session)
         logger.info(f"Generated QR for user {user_id}: Amount ${session['total_price']}, MD5: {md5_hash}")
