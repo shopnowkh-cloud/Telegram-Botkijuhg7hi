@@ -70,6 +70,24 @@ worker_pool = ThreadPoolExecutor(max_workers=16)
 background_pool = ThreadPoolExecutor(max_workers=8)
 _data_lock = threading.RLock()
 
+# Per-user serialization lock. Telegram updates are dispatched to a thread
+# pool, so without this two simultaneous clicks from the same buyer (e.g.
+# mashing the "Check Payment" button or "Cancel" + "Check" at once) could
+# race and cause double delivery, double release, or ghost stock.
+# Different users are never blocked by each other.
+_user_locks_lock = threading.Lock()
+_user_locks = {}
+
+def _user_lock(user_id):
+    """Return a per-user lock used to serialize that user's bot interactions."""
+    key = str(user_id)
+    with _user_locks_lock:
+        lk = _user_locks.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _user_locks[key] = lk
+        return lk
+
 # Bakong KHQR configuration — token loaded from secret
 BAKONG_TOKEN = os.environ.get("BAKONG_TOKEN", "")
 khqr_client = KHQR(BAKONG_TOKEN)
@@ -2168,9 +2186,21 @@ def handle_callback_query(update):
         callback_data = callback_query.get('data')
         user = callback_query.get('from', {})
         user_id = user.get('id')
-        
+
         logger.info(f"Received callback from user {user.get('first_name', 'Unknown')} (ID: {user_id}): {callback_data}")
 
+        # Serialize all actions for this user so two simultaneous clicks
+        # (e.g. mashing the Check Payment button) cannot race each other.
+        with _user_lock(user_id):
+            _handle_callback_query_locked(update, callback_query, chat_id,
+                                          callback_data, user, user_id)
+    except Exception as e:
+        logger.error(f"Error handling callback query: {e}")
+
+
+def _handle_callback_query_locked(update, callback_query, chat_id,
+                                  callback_data, user, user_id):
+    try:
         notify_admin_new_user(user)
         
         # Handle buy button clicks with reply quote functionality
@@ -2577,6 +2607,20 @@ def handle_message(update):
         _set_reply_to_id(message_id)
 
         logger.info(f"Received message from user {user.get('first_name', 'Unknown')} (ID: {user_id}): {text}")
+
+        # Serialize this user's actions so two messages arriving back-to-back
+        # (e.g. a typed quantity right after /start) cannot race the bot's
+        # session/stock updates against each other.
+        with _user_lock(user_id):
+            return _handle_message_locked(update, message, chat_id, message_id,
+                                          text, user, user_id)
+    except Exception as e:
+        logger.error(f"Error handling message: {e}")
+
+
+def _handle_message_locked(update, message, chat_id, message_id, text, user, user_id):
+    global MAINTENANCE_MODE, PAYMENT_NAME, CHANNEL_ID
+    try:
 
         notify_admin_new_user(user)
         
