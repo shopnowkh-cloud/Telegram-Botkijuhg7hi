@@ -744,10 +744,21 @@ def _has_active_purchase(user_id):
 
     Covers both the quantity-selection step and the QR/payment-pending step,
     including pending payments persisted to the DB across restarts.
+
+    Stale quantity-selection sessions (older than PAYMENT_TIMEOUT_SECONDS)
+    are auto-released so a buyer who never picks a quantity isn't locked
+    out forever.
     """
     try:
         sess = user_sessions.get(user_id)
-        if sess and sess.get('state') in ('waiting_for_quantity', 'payment_pending'):
+        if sess and sess.get('state') == 'waiting_for_quantity':
+            started_at = sess.get('started_at') or 0
+            if started_at and (time.time() - started_at) > PAYMENT_TIMEOUT_SECONDS:
+                # Auto-expire the stale lock so the buyer can start fresh.
+                _reset_user_session(user_id)
+                return False
+            return True
+        if sess and sess.get('state') == 'payment_pending':
             return True
         if get_pending_payment(user_id):
             return True
@@ -2407,7 +2418,8 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                             'state': 'waiting_for_quantity',
                             'account_type': account_type,
                             'price': price,
-                            'available_count': count
+                            'available_count': count,
+                            'started_at': time.time(),
                         }
                     save_sessions_async()
 
@@ -2673,6 +2685,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                         'account_type': target_type,
                         'price': price,
                         'available_count': available,
+                        'started_at': time.time(),
                     }
                 session = user_sessions[user_id]
             elif not session or session.get('state') != 'waiting_for_quantity':
