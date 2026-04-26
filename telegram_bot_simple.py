@@ -1739,7 +1739,7 @@ def _show_delete_type_menu_inline(chat_id, user_id=None):
     for t in types:
         count = len(accounts_data['account_types'].get(t, []))
         price = accounts_data.get('prices', {}).get(t, 0)
-        label = f"{_short_label(t)} ({count} pcs · ${price})"
+        label = f"{_short_label(t)} – មានក្នុងស្តុក {count}"
         rows.append([{'text': label}])
         labels_map[label] = t
     rows.append([{'text': BTN_BACK_SETTINGS}])
