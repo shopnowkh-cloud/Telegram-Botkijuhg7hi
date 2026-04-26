@@ -3111,14 +3111,59 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                         email = line.strip()
                         if email and email_pattern.match(email):
                             accounts.append({'email': email})
-                    
-                    if accounts:
+
+                    # Dedup within this batch (case-insensitive) and against
+                    # all emails currently in stock across every account type
+                    # so duplicates are caught the moment they're pasted.
+                    with _data_lock:
+                        all_existing_emails = {
+                            a.get('email', '').lower()
+                            for accs in accounts_data.get('account_types', {}).values()
+                            for a in accs
+                            if a.get('email')
+                        }
+
+                    seen_in_batch = set()
+                    deduped_accounts = []
+                    intra_dupes = []
+                    for a in accounts:
+                        key = a.get('email', '').lower()
+                        if key in seen_in_batch:
+                            intra_dupes.append(a['email'])
+                            continue
+                        seen_in_batch.add(key)
+                        deduped_accounts.append(a)
+
+                    stock_dupes = [a['email'] for a in deduped_accounts
+                                   if a.get('email', '').lower() in all_existing_emails]
+                    new_accounts = [a for a in deduped_accounts
+                                    if a.get('email', '').lower() not in all_existing_emails]
+
+                    if new_accounts:
+                        warnings = []
+                        if intra_dupes:
+                            dup_list = '\n'.join(intra_dupes)
+                            warnings.append(f"⚠️ *អ៊ីមែលដដែលក្នុងបញ្ជី (រំលង)៖*\n```\n{dup_list}\n```")
+                        if stock_dupes:
+                            dup_list = '\n'.join(stock_dupes)
+                            warnings.append(f"⚠️ *អ៊ីមែលមានស្រាប់ក្នុងស្តុក (រំលង)៖*\n```\n{dup_list}\n```")
+                        if warnings:
+                            send_message(chat_id, '\n\n'.join(warnings),
+                                         reply_to_message_id=message_id, parse_mode="Markdown")
+
                         with _data_lock:
-                            session['accounts'] = accounts
+                            session['accounts'] = new_accounts
                             session['state'] = 'waiting_for_account_type'
                         save_sessions_async()
-                        count = len(accounts)
+                        count = len(new_accounts)
                         send_message(chat_id, f"*បានបញ្ចូល គូប៉ុង ចំនួន {count}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
+                    elif accounts:
+                        # Everything was a duplicate — nothing left to add.
+                        all_dupes = intra_dupes + stock_dupes
+                        dup_list = '\n'.join(all_dupes)
+                        send_message(chat_id,
+                            f"❌ *មិនអាចបញ្ចូលបាន!*\n\nអ៊ីមែលទាំងអស់ស្ទួន ឬមានស្រាប់ក្នុងស្តុក៖\n```\n{dup_list}\n```",
+                            reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     else:
                         send_message(chat_id, "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ! សូមបញ្ចូលតាមទម្រង់៖*\n\n```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```", reply_to_message_id=message_id, parse_mode="Markdown", reply_markup=ADD_ACCOUNT_KEYBOARD)
                     return
