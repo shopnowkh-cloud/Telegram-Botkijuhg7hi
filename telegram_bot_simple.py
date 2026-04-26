@@ -1510,6 +1510,7 @@ def _main_kb(uid):
 # ── Admin settings reply-keyboard buttons ──
 BTN_ADD_ACCOUNT     = '➕ បន្ថែម Account'
 BTN_DELETE_TYPE     = '🗑 លុបប្រភេទ'
+BTN_STOCK           = '📦 ស្តុក Account'
 BTN_USERS           = '👥 អ្នកប្រើប្រាស់'
 BTN_BUYERS          = '📋 របាយការណ៍ទិញ'
 BTN_PAYMENT         = '💳 ឈ្មោះ Payment'
@@ -1546,6 +1547,7 @@ BROADCAST_CONFIRM_KEYBOARD = {
 ADMIN_SETTINGS_REPLY_KEYBOARD = {
     'keyboard': [
         [{'text': BTN_ADD_ACCOUNT}, {'text': BTN_DELETE_TYPE}],
+        [{'text': BTN_STOCK}],
         [{'text': BTN_USERS}, {'text': BTN_BUYERS}],
         [{'text': BTN_PAYMENT}, {'text': BTN_BAKONG}],
         [{'text': BTN_CHANNEL}, {'text': BTN_ADMINS}],
@@ -1621,7 +1623,7 @@ ADD_ACCOUNT_KEYBOARD = {
 # Set of submenu/leaf button labels admins can press; used to keep them out of the
 # unrecognized-command fallback.
 ADMIN_BUTTON_LABELS = {
-    BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_USERS, BTN_BUYERS,
+    BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
     BTN_BACK_SETTINGS,
     BTN_PAYMENT_EDIT, BTN_BAKONG_EDIT,
@@ -1829,6 +1831,96 @@ def _export_buyers_report_inline(chat_id):
     except Exception as e:
         logger.error(f"buyers export failed: {e}")
         send_message(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode="HTML", reply_to_message_id=False)
+
+
+def _export_stock_inline(chat_id):
+    """Export the remaining-stock report (all in-stock accounts grouped by type) as TXT."""
+    try:
+        with _data_lock:
+            types = dict(accounts_data.get('account_types', {}) or {})
+            prices = dict(accounts_data.get('prices', {}) or {})
+            # Snapshot reservations from active sessions so the report shows
+            # both available + currently held emails per type.
+            reserved_by_type = {}
+            for sess in user_sessions.values():
+                if not isinstance(sess, dict):
+                    continue
+                if sess.get('state') != 'payment_pending':
+                    continue
+                t = sess.get('account_type')
+                if not t:
+                    continue
+                for acc in (sess.get('reserved_accounts') or []):
+                    if isinstance(acc, dict) and acc.get('email'):
+                        reserved_by_type.setdefault(t, []).append(str(acc['email']))
+
+        import datetime as _dt
+        now_str = _dt.datetime.now(_dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        lines = []
+        lines.append(f"Stock Report — generated {now_str}")
+        type_names = sorted(types.keys())
+        total_available = 0
+        total_reserved = 0
+        for t in type_names:
+            pool = types.get(t) or []
+            avail = len(pool)
+            reserved_emails = reserved_by_type.get(t, [])
+            total_available += avail
+            total_reserved += len(reserved_emails)
+            lines.append("")
+            lines.append("=" * 70)
+            lines.append(f"Type    : {t}")
+            lines.append(f"Price   : ${prices.get(t, 0)}")
+            lines.append(f"In stock: {avail}")
+            if reserved_emails:
+                lines.append(f"Reserved (active QR): {len(reserved_emails)}")
+            lines.append("-" * 70)
+            if avail == 0 and not reserved_emails:
+                lines.append("(empty)")
+            else:
+                for acc in pool:
+                    if isinstance(acc, dict):
+                        em = acc.get('email')
+                        if em:
+                            lines.append(f"  • {em}")
+                        else:
+                            phone = acc.get('phone', '')
+                            pw = acc.get('password', '')
+                            lines.append(f"  • {phone} | {pw}")
+                if reserved_emails:
+                    lines.append("")
+                    lines.append("  [Reserved — currently inside an active QR]")
+                    for em in reserved_emails:
+                        lines.append(f"  · {em}")
+        lines.append("")
+        lines.append("=" * 70)
+        lines.append(f"Total types     : {len(type_names)}")
+        lines.append(f"Total in stock  : {total_available}")
+        lines.append(f"Total reserved  : {total_reserved}")
+
+        if not type_names:
+            send_message(chat_id, "📦 មិនមានប្រភេទ Account ឡើយទេ។",
+                         parse_mode="HTML", reply_to_message_id=False,
+                         reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
+            return
+
+        txt = "\n".join(lines).encode('utf-8')
+        filename = f"stock_{_dt.datetime.now(_dt.timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
+        files = {'document': (filename, txt, 'text/plain')}
+        caption = (f"📦 ស្តុក Account — {len(type_names)} ប្រភេទ, "
+                   f"{total_available} នៅសល់" +
+                   (f", {total_reserved} កំពុងកក់ទុក" if total_reserved else ""))
+        data = {'chat_id': chat_id, 'caption': caption}
+        resp = http.post(f"{API_URL}/sendDocument", data=data, files=files, timeout=30)
+        if resp.status_code >= 400 or not resp.json().get('ok'):
+            logger.error(f"sendDocument (stock) failed: {resp.text}")
+            send_message(chat_id, "❌ បរាជ័យក្នុងការផ្ញើ​ឯកសារ", reply_to_message_id=False,
+                         reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
+    except Exception as e:
+        logger.error(f"stock export failed: {e}")
+        send_message(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>",
+                     parse_mode="HTML", reply_to_message_id=False,
+                     reply_markup=ADMIN_SETTINGS_REPLY_KEYBOARD)
 
 
 def _show_admins_inline(chat_id):
@@ -2819,6 +2911,9 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                 return
             if btn == BTN_DELETE_TYPE:
                 _show_delete_type_menu_inline(chat_id, user_id)
+                return
+            if btn == BTN_STOCK:
+                _export_stock_inline(chat_id)
                 return
             if btn == BTN_USERS:
                 _show_users_list_inline(chat_id)
