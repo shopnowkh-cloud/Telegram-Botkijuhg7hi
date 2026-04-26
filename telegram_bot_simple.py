@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import time
 import logging
 import sys
@@ -50,6 +52,20 @@ API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # Persistent HTTP session — reuses TCP connections for faster Telegram API calls
 http = requests.Session()
 http.headers.update({'Connection': 'keep-alive'})
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=0.3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+    raise_on_status=False,
+)
+_http_adapter = HTTPAdapter(
+    max_retries=_retry_strategy,
+    pool_connections=20,
+    pool_maxsize=50,
+)
+http.mount("https://", _http_adapter)
+http.mount("http://", _http_adapter)
 worker_pool = ThreadPoolExecutor(max_workers=16)
 background_pool = ThreadPoolExecutor(max_workers=8)
 _data_lock = threading.RLock()
@@ -2362,9 +2378,10 @@ def handle_callback_query(update):
                 session['quantity'] = quantity
                 session['total_price'] = total_price
                 session['state'] = 'waiting_for_confirmation'
-            save_sessions_async()
 
+            # Answer immediately before any I/O so the button feels instant
             answer_callback(callback_query['id'])
+            save_sessions_async()
 
             # Delete the quantity keyboard message
             delete_message_async(chat_id, callback_query['message']['message_id'])
@@ -2380,20 +2397,27 @@ def handle_callback_query(update):
                 answer_callback(callback_query['id'], 'មិនមានការទិញដែលកំពុងរង់ចាំ។', True)
                 return
 
-            # Check payment status
             md5 = session.get('md5_hash')
             if not md5:
                 answer_callback(callback_query['id'], 'មានបញ្ហាក្នុងការស្វែងរក QR។ សូមចាប់ផ្តើមម្តងទៀត។', True)
                 return
+
+            # Answer immediately so the button spinner clears at once,
+            # then check Bakong — this keeps the UI feeling instant.
+            answer_callback(callback_query['id'], '⏳ កំពុងពិនិត្យ...')
             is_paid, payment_data = check_payment_status(md5)
             if is_paid:
-                answer_callback(callback_query['id'], '✅ ការបង់ប្រាក់បានបញ្ជាក់!')
                 user_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
                 deliver_accounts(chat_id, user_id, session, payment_data=payment_data, user_name=user_name)
                 delete_pending_payment_async(user_id)
                 save_sessions_async()
             else:
-                answer_callback(callback_query['id'], '⏳ មិនទាន់បានទទួលការបង់ប្រាក់។ សូមព្យាយាមម្តងទៀត។', True)
+                send_message(
+                    chat_id,
+                    "⏳ មិនទាន់បានទទួលការបង់ប្រាក់។\nសូមបង់ប្រាក់ហើយចុចពិនិត្យម្ដងទៀត។",
+                    reply_to_message_id=False,
+                    reply_markup=False,
+                )
             return
 
         # Handle cancel purchase
