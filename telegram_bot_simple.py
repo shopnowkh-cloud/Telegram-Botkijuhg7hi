@@ -773,7 +773,7 @@ def _notify_must_finish_order(chat_id):
         chat_id,
         "⏳ <b>សូមបញ្ចប់ការទិញបច្ចុប្បន្នជាមុនសិន</b>\n\n"
         "អ្នកមានការបញ្ជាទិញមួយកំពុងដំណើរការ។ សូមបញ្ចប់ការទូទាត់ "
-        "ឬចុច 🚫 បោះបង់ មុននឹងចាប់ផ្តើមការទិញថ្មី។",
+        "ឬចុច /cancel មុននឹងចាប់ផ្តើមការទិញថ្មី។",
         parse_mode="HTML",
         reply_to_message_id=False,
     )
@@ -2847,6 +2847,22 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
                 _notify_must_finish_order(chat_id)
                 return
             _reset_user_session(user_id)
+            show_account_selection_local()
+            return
+
+        if text.strip() == '/cancel':
+            session = user_sessions.get(user_id) or get_pending_payment(user_id)
+            if not session or session.get('state') not in ('waiting_for_quantity', 'payment_pending'):
+                show_account_selection_local()
+                return
+            # Clean up any QR / quantity-selection messages still on screen.
+            for key in ('photo_message_id', 'qr_message_id', 'dot_message_id'):
+                mid = session.get(key)
+                if mid:
+                    delete_message_async(chat_id, mid)
+            _reset_user_session(user_id)
+            send_message(chat_id, "🚫 <b>បានបោះបង់ការបញ្ជាទិញ</b>",
+                         parse_mode="HTML", reply_to_message_id=False)
             show_account_selection_local()
             return
 
