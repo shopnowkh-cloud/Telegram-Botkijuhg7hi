@@ -64,6 +64,9 @@ PAYMENT_NAME = "RADY"
 # Maintenance mode flag (admin /update on | /update off)
 MAINTENANCE_MODE = False
 
+# QR Code expiry timeout (seconds)
+PAYMENT_TIMEOUT_SECONDS = 5 * 60
+
 # ── Manual KHQR builder (fallback when library generates invalid strings) ──
 def _crc16_ccitt(data: str) -> str:
     """CRC16-CCITT-FALSE: poly=0x1021, init=0xFFFF, no reflection."""
@@ -1120,6 +1123,79 @@ def answer_callback(callback_query_id, text=None, show_alert=False):
         logger.warning(f"Failed to answer callback quickly: {e}")
         return None
 
+def _qr_caption(amount, seconds_left):
+    """Build the QR caption with the live countdown remaining."""
+    if seconds_left < 0:
+        seconds_left = 0
+    minutes = seconds_left // 60
+    seconds = seconds_left % 60
+    return (
+        f"💵 <b>ចំនួនទឹកប្រាក់៖</b> ${amount}\n"
+        f"⏳ <b>QR នឹងផុតកំណត់ក្នុង៖</b> {minutes:02d}:{seconds:02d}"
+    )
+
+
+def _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at):
+    """Background thread: refresh QR caption every 30s and expire after timeout."""
+    def run():
+        try:
+            while True:
+                elapsed = int(time.time() - started_at)
+                remaining = PAYMENT_TIMEOUT_SECONDS - elapsed
+                with _data_lock:
+                    sess = user_sessions.get(user_id)
+                    still_active = bool(
+                        sess
+                        and sess.get('md5_hash') == md5_hash
+                        and sess.get('state') == 'payment_pending'
+                    )
+                if not still_active:
+                    return
+                if remaining <= 0:
+                    delete_message_async(chat_id, msg_id)
+                    with _data_lock:
+                        if (user_id in user_sessions
+                                and user_sessions[user_id].get('md5_hash') == md5_hash):
+                            del user_sessions[user_id]
+                    save_sessions_async()
+                    delete_pending_payment_async(user_id)
+                    send_message(
+                        chat_id,
+                        "⌛ <b>QR Code បានផុតកំណត់</b>\n\nសូមបង្កើតការទិញម្តងទៀត។",
+                        parse_mode="HTML",
+                        reply_to_message_id=False,
+                    )
+                    try:
+                        show_account_selection(chat_id)
+                    except Exception as e:
+                        logger.warning(f"show_account_selection after expiry failed: {e}")
+                    return
+                edit_message_caption(
+                    chat_id, msg_id,
+                    _qr_caption(amount, remaining),
+                    reply_markup=CHECK_PAYMENT_KEYBOARD,
+                )
+                time.sleep(30)
+        except Exception as e:
+            logger.error(f"QR countdown thread failed: {e}")
+    threading.Thread(target=run, daemon=True).start()
+
+
+def edit_message_caption(chat_id, message_id, caption, parse_mode='HTML', reply_markup=None):
+    """Edit the caption of a previously sent photo."""
+    url = f"{API_URL}/editMessageCaption"
+    data = {'chat_id': chat_id, 'message_id': message_id, 'caption': caption}
+    if parse_mode:
+        data['parse_mode'] = parse_mode
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
+    try:
+        r = http.post(url, data=data, timeout=10)
+        return r.json()
+    except requests.RequestException as e:
+        logger.warning(f"editMessageCaption failed: {e}")
+        return None
+
 def send_photo_bytes(chat_id, photo_bytes, caption=None, parse_mode=None, reply_markup=None):
     """Send a photo from raw bytes to a specific chat (no filesystem needed)."""
     url = f"{API_URL}/sendPhoto"
@@ -2056,12 +2132,20 @@ def handle_callback_query(update):
                     return
                 md5_hash = md5_or_err
                 session['md5_hash'] = md5_hash
-                session['qr_sent_at'] = time.time()
-                photo_resp = send_photo_bytes(chat_id, img_bytes, reply_markup=CHECK_PAYMENT_KEYBOARD)
+                started_at = time.time()
+                session['qr_sent_at'] = started_at
+                amount = session['total_price']
+                photo_resp = send_photo_bytes(
+                    chat_id, img_bytes,
+                    caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
+                    parse_mode='HTML',
+                    reply_markup=CHECK_PAYMENT_KEYBOARD,
+                )
                 if photo_resp and photo_resp.get('result'):
                     msg_id = photo_resp['result']['message_id']
                     session['photo_message_id'] = msg_id
                     session['qr_message_id'] = msg_id
+                    _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
                 save_sessions_async()
                 save_pending_payment_async(user_id, chat_id, session)
                 logger.info(f"Generated QR for user {user_id}: Amount ${session['total_price']}, MD5: {md5_hash}")
@@ -2645,15 +2729,23 @@ def handle_message(update):
                             return
                         md5_hash = md5_or_err
                         session['md5_hash'] = md5_hash
-                        session['qr_sent_at'] = time.time()
+                        started_at = time.time()
+                        session['qr_sent_at'] = started_at
+                        amount = session['total_price']
                         dot_resp = send_sticker(chat_id, "CAACAgUAAxkBAAILvGnnaWwK-AXFeING4WOtIIKmoFYqAAIVAAMxIPsrpHGBfRB524Y7BA", reply_markup=_main_kb(user_id))
                         if dot_resp and dot_resp.get('result'):
                             session['dot_message_id'] = dot_resp['result']['message_id']
-                        photo_resp = send_photo_bytes(chat_id, img_bytes, reply_markup=CHECK_PAYMENT_KEYBOARD)
+                        photo_resp = send_photo_bytes(
+                            chat_id, img_bytes,
+                            caption=_qr_caption(amount, PAYMENT_TIMEOUT_SECONDS),
+                            parse_mode='HTML',
+                            reply_markup=CHECK_PAYMENT_KEYBOARD,
+                        )
                         if photo_resp and photo_resp.get('result'):
                             msg_id = photo_resp['result']['message_id']
                             session['photo_message_id'] = msg_id
                             session['qr_message_id'] = msg_id
+                            _start_qr_countdown(chat_id, user_id, msg_id, md5_hash, amount, started_at)
                         save_sessions_async()
                         save_pending_payment_async(user_id, chat_id, session)
                     except Exception as e:
