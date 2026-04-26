@@ -2379,7 +2379,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                 return
 
             # Buyers must finish (or cancel) the current order before starting a new one.
-            if not is_admin(user_id) and _has_active_purchase(user_id):
+            if _has_active_purchase(user_id):
                 answer_callback(
                     callback_query['id'],
                     "សូមបញ្ចប់ការទិញបច្ចុប្បន្នជាមុនសិន ទើបអាចបញ្ជាទិញថ្មីបាន។",
@@ -2809,7 +2809,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
 
         if text.strip() == '/start':
             logger.info(f"User {user_id} triggered account selection interface")
-            if not is_admin(user_id) and _has_active_purchase(user_id):
+            if _has_active_purchase(user_id):
                 _notify_must_finish_order(chat_id)
                 return
             _reset_user_session(user_id)
@@ -3026,20 +3026,10 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
             session = user_sessions[user_id]
 
             # Handle payment_pending session.
-            # Buyers must complete (or cancel via the QR's 🚫 button) the
-            # current order before starting a new one. Admins keep the
-            # legacy auto-clear behaviour for testing convenience.
+            # Everyone — including admins — must complete (or cancel via the
+            # QR's 🚫 button) the current order before starting a new one.
             if session.get('state') == 'payment_pending':
-                if not is_admin(user_id):
-                    _notify_must_finish_order(chat_id)
-                    return
-                # Return any reserved emails so they aren't lost.
-                _release_reserved_accounts(session)
-                with _data_lock:
-                    del user_sessions[user_id]
-                save_sessions_async()
-                delete_pending_payment_async(user_id)
-                show_account_selection(chat_id)
+                _notify_must_finish_order(chat_id)
                 return
 
             # Quantity must be chosen via inline buttons only — ignore text input
