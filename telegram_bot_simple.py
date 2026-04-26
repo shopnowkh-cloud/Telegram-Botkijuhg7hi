@@ -1252,11 +1252,7 @@ ACCOUNT_BTN_PREFIX = "ទិញ "
 ACCOUNT_BTN_SUFFIX = " - មានក្នុងស្តុក "
 
 def show_account_selection(chat_id):
-    """Send the account selection.
-
-    - Buyers (non-admins): inline keyboard attached to the message.
-    - Admins: persistent reply keyboard with the settings button.
-    """
+    """Send the account selection as inline buttons (same flow for buyers and admins)."""
     available = []
     for account_type, accounts in accounts_data['account_types'].items():
         count = len(accounts)
@@ -1268,31 +1264,16 @@ def show_account_selection(chat_id):
         send_message(chat_id, "_សូមអភ័យទោស អស់ពីស្តុក 🪤_", parse_mode="Markdown", reply_to_message_id=False, reply_markup=_main_kb(chat_id))
         return
 
-    # In private chats, chat_id == user_id, so we can check admin status here
-    if is_admin(chat_id):
-        buttons = []
-        for account_type, count, _ in available:
-            button_text = f"{ACCOUNT_BTN_PREFIX}{account_type}{ACCOUNT_BTN_SUFFIX}{count}"
-            buttons.append([{'text': button_text}])
-        buttons.append([{'text': ADMIN_SETTINGS_BTN}])
-        reply_keyboard = {
-            'keyboard': buttons,
-            'resize_keyboard': True,
-            'is_persistent': True,
-        }
-        send_message(chat_id, "<b>សូមជ្រើសរើស Account ដើម្បីទិញ៖</b>",
-                     reply_to_message_id=False, reply_markup=reply_keyboard, parse_mode="HTML")
-    else:
-        inline_rows = []
-        for account_type, count, price in available:
-            label = f"{account_type} {price}$ - មានក្នុងស្តុក {count}"
-            inline_rows.append([{
-                'text': label,
-                'callback_data': f"buy:{_type_callback_id(account_type)}"
-            }])
-        inline_keyboard = {'inline_keyboard': inline_rows}
-        send_message(chat_id, "<b>សូមជ្រើសរើស Account ដើម្បីទិញ៖</b>",
-                     reply_to_message_id=False, reply_markup=inline_keyboard, parse_mode="HTML")
+    inline_rows = []
+    for account_type, count, price in available:
+        label = f"{account_type} {price}$ - មានក្នុងស្តុក {count}"
+        inline_rows.append([{
+            'text': label,
+            'callback_data': f"buy:{_type_callback_id(account_type)}"
+        }])
+    inline_keyboard = {'inline_keyboard': inline_rows}
+    send_message(chat_id, "<b>សូមជ្រើសរើស Account ដើម្បីទិញ៖</b>",
+                 reply_to_message_id=False, reply_markup=inline_keyboard, parse_mode="HTML")
 
 
 MAIN_REPLY_KEYBOARD = {
@@ -1305,7 +1286,6 @@ MAIN_REPLY_KEYBOARD = {
 
 ADMIN_REPLY_KEYBOARD = {
     'keyboard': [
-        [{'text': '💵 ទិញគូប៉ុង'}],
         [{'text': '⚙️កំណត់'}]
     ],
     'resize_keyboard': True,
@@ -1939,7 +1919,7 @@ def _run_broadcast(admin_chat_id, source_message_id, use_copy=False):
 
 
 def _send_order_summary(chat_id, user_id, session):
-    """Send order summary. Buyers get inline confirm/cancel; admins get the reply keyboard.
+    """Send order summary with inline confirm/cancel (same for buyers and admins).
 
     Stores summary_message_id in session.
     """
@@ -1951,15 +1931,12 @@ def _send_order_summary(chat_id, user_id, session):
         f"🔹 ប្រភេទ: {session['account_type']}\n\n"
         f"🔹 តម្លៃ: {total_price}$</blockquote>"
     )
-    if is_admin(user_id):
-        markup = CONFIRM_REPLY_KEYBOARD
-    else:
-        markup = {
-            'inline_keyboard': [[
-                {'text': '🚫 បោះបង់', 'callback_data': 'cancel_buy'},
-                {'text': '✅ យល់ព្រម', 'callback_data': 'confirm_buy'},
-            ]]
-        }
+    markup = {
+        'inline_keyboard': [[
+            {'text': '🚫 បោះបង់', 'callback_data': 'cancel_buy'},
+            {'text': '✅ យល់ព្រម', 'callback_data': 'confirm_buy'},
+        ]]
+    }
     resp = send_message(chat_id, summary, reply_to_message_id=False, parse_mode="HTML", reply_markup=markup)
     if resp and resp.get('result'):
         with _data_lock:
@@ -2418,51 +2395,11 @@ def handle_message(update):
                     del user_sessions[user_id]
             if had_session:
                 save_sessions_async()
+            # Ensure the admin's persistent settings reply keyboard is visible by
+            # sending a short message before the inline account selection.
             if is_admin(user_id):
-                try:
-                    user_display_name = user.get('last_name') or user.get('first_name', '')
-                    welcome_caption = f'<tg-emoji emoji-id="5967385500447675533">🎉</tg-emoji> <b>សូមស្វាគមន៍ {user_display_name}</b>'
-                    send_start_banner(chat_id, caption=welcome_caption, parse_mode='HTML', message_effect_id='5046509860389126442', reply_markup=_main_kb(user_id))
-                except Exception as e:
-                    logger.error(f"Failed to send banner image: {e}")
-            else:
-                # Buyers: skip the banner and go straight to account selection.
-                show_account_selection_local()
-            return
-
-        if text.strip() == '💵 ទិញគូប៉ុង':
+                send_message(chat_id, "👑 <b>Admin</b>", parse_mode="HTML", reply_to_message_id=False)
             show_account_selection_local()
-            return
-
-        # Handle account selection reply keyboard button press
-        if text.strip().startswith(ACCOUNT_BTN_PREFIX):
-            raw = text.strip()[len(ACCOUNT_BTN_PREFIX):]
-            account_type = raw.split(ACCOUNT_BTN_SUFFIX)[0]
-            if account_type in accounts_data.get('account_types', {}):
-                with _data_lock:
-                    accounts = accounts_data['account_types'][account_type]
-                    count = len(accounts)
-                    price = accounts_data['prices'].get(account_type, 0)
-                if count > 0:
-                    with _data_lock:
-                        user_sessions[user_id] = {
-                            'state': 'waiting_for_quantity',
-                            'account_type': account_type,
-                            'price': price,
-                            'available_count': count
-                        }
-                    save_sessions_async()
-                    reply_message = "*សូមជ្រើសរើសចំនួនដែលចង់ទិញ៖*"
-                    qty_buttons = [{'text': str(n)} for n in range(1, count + 1)]
-                    qty_rows = [qty_buttons[i:i+5] for i in range(0, len(qty_buttons), 5)]
-                    qty_keyboard = {'keyboard': qty_rows, 'resize_keyboard': True}
-                    send_message(chat_id, reply_message, reply_to_message_id=False, parse_mode="Markdown", reply_markup=qty_keyboard)
-                    logger.info(f"User {user_id} selected account type '{account_type}' via reply keyboard")
-                else:
-                    send_message(chat_id, f"សូមអភ័យទោស Account {account_type} អស់ពីស្តុក 🪤", reply_markup=_main_kb(user_id))
-                    show_account_selection_local()
-            else:
-                show_account_selection_local()
             return
 
         # Admin: open settings menu via the ⚙️កំណត់ keyboard button
