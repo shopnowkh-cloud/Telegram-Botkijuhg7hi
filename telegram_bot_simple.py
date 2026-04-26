@@ -2393,6 +2393,10 @@ def handle_message(update):
                 send_start_banner(chat_id, caption=welcome_caption, parse_mode='HTML', message_effect_id='5046509860389126442', reply_markup=_main_kb(user_id))
             except Exception as e:
                 logger.error(f"Failed to send banner image: {e}")
+            # For buyers (non-admins), immediately show the account selection
+            # since they no longer have the persistent main keyboard.
+            if not is_admin(user_id):
+                show_account_selection_local()
             return
 
         if text.strip() == '💵 ទិញគូប៉ុង':
