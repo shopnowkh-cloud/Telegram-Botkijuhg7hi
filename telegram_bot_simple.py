@@ -2395,10 +2395,6 @@ def handle_message(update):
                     del user_sessions[user_id]
             if had_session:
                 save_sessions_async()
-            # Ensure the admin's persistent settings reply keyboard is visible by
-            # sending a short message before the inline account selection.
-            if is_admin(user_id):
-                send_message(chat_id, "👑 <b>Admin</b>", parse_mode="HTML", reply_to_message_id=False)
             show_account_selection_local()
             return
 
