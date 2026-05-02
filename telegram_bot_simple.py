@@ -1339,16 +1339,44 @@ def _qr_caption(amount):
     return f"💵 <b>ចំនួនទឹកប្រាក់៖</b> ${amount}"
 
 
+PAYMENT_POLL_INTERVAL = 5   # seconds between each auto-check
+
+def _try_auto_deliver(chat_id, user_id, md5_hash, payment_data):
+    """Deliver accounts after auto-detected payment. Returns True on success."""
+    info = fetch_user_info(user_id) or {}
+    user_name = f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
+    delivered_session = None
+    with _data_lock:
+        if (user_id in user_sessions
+                and user_sessions[user_id].get('md5_hash') == md5_hash):
+            delivered_session = user_sessions[user_id]
+    if delivered_session is None:
+        return False
+    try:
+        deliver_accounts(chat_id, user_id, delivered_session,
+                         payment_data=payment_data, user_name=user_name)
+        delete_pending_payment_async(user_id)
+        save_sessions_async()
+        return True
+    except Exception as e:
+        logger.error(f"Auto-deliver failed for user {user_id}: {e}")
+        return False
+
+
 def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
-    """Background thread: wait until the QR's 2-minute lifetime ends, then
-    expire the session and clean up. No per-second updates."""
+    """Background thread: poll payment every PAYMENT_POLL_INTERVAL seconds and
+    deliver automatically on success. Expires the session when timeout is reached."""
     def run():
         try:
             while True:
-                elapsed = time.time() - started_at
+                elapsed  = time.time() - started_at
                 remaining = PAYMENT_TIMEOUT_SECONDS - elapsed
-                if remaining > 0:
-                    time.sleep(min(remaining, 5))
+                # Sleep up to PAYMENT_POLL_INTERVAL seconds (or until timeout)
+                sleep_for = min(max(remaining, 0), PAYMENT_POLL_INTERVAL)
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+
+                # Check if session is still active
                 with _data_lock:
                     sess = user_sessions.get(user_id)
                     still_active = bool(
@@ -1358,10 +1386,10 @@ def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
                     )
                 if not still_active:
                     return
-                if time.time() - started_at < PAYMENT_TIMEOUT_SECONDS:
-                    continue
-                # Serialize with check_payment / cancel_purchase so we don't
-                # race the user clicking right at the deadline.
+
+                timed_out = time.time() - started_at >= PAYMENT_TIMEOUT_SECONDS
+
+                # Serialize with cancel_purchase so we don't race button clicks
                 with _user_lock(user_id):
                     with _data_lock:
                         sess_now = user_sessions.get(user_id)
@@ -1373,40 +1401,23 @@ def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
                     if not still_active:
                         return
 
-                    # Final auto-check: maybe the buyer paid in the last few
-                    # seconds. If so, deliver instead of expiring.
+                    # Auto-check payment status
                     try:
                         is_paid, payment_data = check_payment_status(md5_hash)
                     except Exception as e:
-                        logger.warning(f"Auto-check payment failed for user {user_id}: {e}")
+                        logger.warning(f"Auto-poll payment failed for user {user_id}: {e}")
                         is_paid, payment_data = False, None
 
                     if is_paid:
-                        info = fetch_user_info(user_id) or {}
-                        user_name = (
-                            f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
-                        )
-                        delivered_session = None
-                        with _data_lock:
-                            if (user_id in user_sessions
-                                    and user_sessions[user_id].get('md5_hash') == md5_hash):
-                                delivered_session = user_sessions[user_id]
-                        if delivered_session is None:
-                            return
-                        try:
-                            deliver_accounts(
-                                chat_id, user_id, delivered_session,
-                                payment_data=payment_data, user_name=user_name,
-                            )
-                            delete_pending_payment_async(user_id)
-                            save_sessions_async()
-                            logger.info(
-                                f"Auto-check on QR expiry confirmed payment for user {user_id}"
-                            )
-                        except Exception as e:
-                            logger.error(f"Auto-deliver after auto-check failed: {e}")
+                        logger.info(f"Auto-poll detected payment for user {user_id}, delivering…")
+                        _try_auto_deliver(chat_id, user_id, md5_hash, payment_data)
                         return
 
+                    if not timed_out:
+                        # Not paid yet, keep polling
+                        continue
+
+                    # Timed out and not paid — expire
                     delete_message_async(chat_id, msg_id)
                     expired_session = None
                     with _data_lock:
@@ -1428,8 +1439,8 @@ def _schedule_qr_expiry(chat_id, user_id, msg_id, md5_hash, started_at):
                         logger.warning(f"show_account_selection after expiry failed: {e}")
                     return
         except Exception as e:
-            logger.error(f"QR expiry thread failed: {e}")
-    threading.Thread(target=run, daemon=True).start()
+            logger.error(f"QR expiry/poll thread failed: {e}")
+    threading.Thread(target=run, daemon=True, name=f"qr-poll-{user_id}").start()
 
 
 def edit_message_caption(chat_id, message_id, caption, parse_mode='HTML', reply_markup=None):
@@ -3413,8 +3424,7 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
 CHECK_PAYMENT_KEYBOARD = {
     'inline_keyboard': [
         [
-            {'text': '🚫 បោះបង់', 'callback_data': 'cancel_purchase'},
-            {'text': '✅ ពិនិត្យការបង់ប្រាក់', 'callback_data': 'check_payment'}
+            {'text': '🚫 បោះបង់', 'callback_data': 'cancel_purchase'}
         ]
     ]
 }
