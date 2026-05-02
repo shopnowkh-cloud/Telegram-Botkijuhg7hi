@@ -24,7 +24,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bakong_khqr import KHQR
 
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
@@ -131,7 +131,7 @@ def get_user_lock(user_id: int) -> asyncio.Lock:
 
 async def run_sync(fn, *args, **kwargs):
     """Run a blocking function in the default thread pool without blocking the event loop."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
 
 
@@ -492,6 +492,25 @@ def _filter_out_already_sold(user_id, reserved):
     if dropped:
         logger.info(f"Skipped re-stocking {dropped} already-sold account(s) for user {user_id}")
     return kept
+
+
+def _drain_bot_api_queue():
+    """Consume any updates sitting in Telegram's Bot API HTTP queue.
+    Pyrogram uses MTProto for updates, but stale Bot-API-queued updates can
+    prevent new MTProto pushes from arriving. Draining on startup fixes this."""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+        # First call: find the highest update_id
+        resp = http.get(url, params={"limit": 100, "timeout": 0}, timeout=15)
+        result = resp.json().get("result", [])
+        if not result:
+            return
+        max_id = max(u["update_id"] for u in result)
+        # Second call: acknowledge them all by advancing offset past the last one
+        http.get(url, params={"offset": max_id + 1, "limit": 1, "timeout": 0}, timeout=15)
+        logger.info(f"Drained {len(result)} stale Bot API update(s) (last id={max_id})")
+    except Exception as e:
+        logger.warning(f"Bot API queue drain failed (non-fatal): {e}")
 
 
 def _cleanup_expired_pending_payments():
@@ -1776,10 +1795,12 @@ async def on_start(client, message):
     async with get_user_lock(user.id):
         if await _has_active_purchase(user.id):
             await _notify_must_finish_order(message.chat.id)
+            message.stop_propagation()
             return
         await _reset_user_session(user.id)
         logger.info(f"User {user.id} triggered account selection")
         await show_account_selection(message.chat.id)
+    message.stop_propagation()
 
 
 @app.on_message(filters.private & filters.command("cancel"), group=0)
@@ -1790,6 +1811,7 @@ async def on_cancel(client, message):
         session = user_sessions.get(user_id) or await run_sync(_get_pending_payment, user_id)
         if not session or session.get("state") not in ("waiting_for_quantity", "payment_pending"):
             await show_account_selection(chat_id)
+            message.stop_propagation()
             return
         for key in ("photo_message_id", "qr_message_id", "dot_message_id"):
             mid = session.get(key)
@@ -1797,6 +1819,7 @@ async def on_cancel(client, message):
                 asyncio.create_task(delete_msg(chat_id, mid))
         await _reset_user_session(user_id)
         await show_account_selection(chat_id)
+    message.stop_propagation()
 
 
 # ─── group 1: Admin ⚙️ button ─────────────────────────────────────────────────
@@ -2463,7 +2486,6 @@ async def _on_startup():
     global BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, EXTRA_ADMIN_IDS
 
     await run_sync(_init_db)
-    logger.info("Replit PostgreSQL DB initialized")
 
     # Restore settings from DB (cache-backed)
     _sv = await run_sync(_get_setting, "PAYMENT_NAME")
@@ -2527,21 +2549,23 @@ async def _on_startup():
 
     me = await app.get_me()
     logger.info(f"Bot connected: @{me.username}")
+
+    # Drain any pending Bot API HTTP queue so Pyrogram MTProto can receive
+    # new updates cleanly (stale queued updates block MTProto delivery).
+    await run_sync(_drain_bot_api_queue)
     logger.info("Bot is now listening for updates (Pyrogram MTProto)...")
 
 
-# ── 21. Main ──────────────────────────────────────────────────────────────────
-async def main():
-    async with app:
+
+# ── 22. Main ──────────────────────────────────────────────────────────────────
+async def _run():
+    await app.start()
+    try:
         await _on_startup()
-        await asyncio.Event().wait()   # run forever
+        await idle()
+    finally:
+        await app.stop()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
+    app.run(_run())
