@@ -88,9 +88,14 @@ def _user_lock(user_id):
             _user_locks[key] = lk
         return lk
 
-# Bakong KHQR configuration — token loaded from secret
-BAKONG_TOKEN = os.environ.get("BAKONG_TOKEN", "")
-khqr_client = KHQR(BAKONG_TOKEN)
+# Bakong KHQR configuration — tokens loaded from secret / DB
+# BAKONG_RELAY_TOKEN  : Bakong Relay API token (starts with "rbk...")
+# BAKONG_API_TOKEN    : Original Bakong NBC API token (JWT)
+# BAKONG_TOKEN        : Active token used for KHQR client (relay preferred)
+BAKONG_RELAY_TOKEN = os.environ.get("BAKONG_RELAY_TOKEN", "")
+BAKONG_API_TOKEN   = os.environ.get("BAKONG_TOKEN", "")   # env var still named BAKONG_TOKEN
+BAKONG_TOKEN       = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
+khqr_client = KHQR(BAKONG_TOKEN) if BAKONG_TOKEN else None
 
 # Payment merchant name (changeable by admin via /payment <name>)
 PAYMENT_NAME = "RADY"
@@ -156,7 +161,7 @@ def _build_khqr_manual(bank_account, merchant_name, merchant_city,
 def generate_payment_qr(amount):
     """Generate QR code using bakong-khqr library. Returns (img_bytes, md5) or (None, error_msg) on failure."""
     # Check token is present
-    if not BAKONG_TOKEN:
+    if not BAKONG_TOKEN or not khqr_client:
         msg = "BAKONG_TOKEN មិនមានក្នុង environment"
         logger.error(msg)
         return None, msg, None
@@ -253,9 +258,10 @@ def generate_payment_qr(amount):
         logger.error(f"Failed to generate payment QR: {msg}")
         return None, msg, None
 
-def _bakong_api_url():
+def _bakong_api_url(token=None):
     """Return correct Bakong API base URL based on token prefix."""
-    if BAKONG_TOKEN and BAKONG_TOKEN.startswith("rbk"):
+    t = token or BAKONG_TOKEN
+    if t and t.startswith("rbk"):
         return "https://api.bakongrelay.com/v1"
     return "https://api-bakong.nbc.gov.kh/v1"
 
@@ -265,26 +271,34 @@ def compute_md5(qr: str) -> str:
     return hashlib.md5(qr.encode('utf-8')).hexdigest()
 
 def check_payment_status(md5):
-    """Check payment directly against Bakong relay API — no library dependency.
+    """Check payment status — tries Relay token first, then original Bakong API.
     Returns (is_paid: bool, payment_data: dict or None)."""
-    try:
-        base = _bakong_api_url()
-        resp = http.post(
-            f"{base}/check_transaction_by_md5",
-            json={"md5": md5},
-            headers={
-                "Authorization": f"Bearer {BAKONG_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            timeout=10
-        )
-        data = resp.json()
-        logger.info(f"check_payment response: status={resp.status_code} body={data}")
-        if data.get("responseCode") == 0:
-            return True, data.get("data", {})
-        return False, None
-    except Exception as e:
-        logger.error(f"Failed to check payment status: {type(e).__name__}: {e}")
+    tokens_to_try = []
+    if BAKONG_RELAY_TOKEN:
+        tokens_to_try.append(BAKONG_RELAY_TOKEN)
+    if BAKONG_API_TOKEN and BAKONG_API_TOKEN not in tokens_to_try:
+        tokens_to_try.append(BAKONG_API_TOKEN)
+    if not tokens_to_try and BAKONG_TOKEN:
+        tokens_to_try.append(BAKONG_TOKEN)
+    for token in tokens_to_try:
+        try:
+            base = _bakong_api_url(token)
+            resp = http.post(
+                f"{base}/check_transaction_by_md5",
+                json={"md5": md5},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=10
+            )
+            data = resp.json()
+            logger.info(f"check_payment via {'relay' if token.startswith('rbk') else 'bakong'}: status={resp.status_code} responseCode={data.get('responseCode')}")
+            if data.get("responseCode") == 0:
+                return True, data.get("data", {})
+            # Non-zero response — try next token
+        except Exception as e:
+            logger.warning(f"check_payment failed with {'relay' if token.startswith('rbk') else 'bakong'} token: {type(e).__name__}: {e}")
     return False, None
 
 NEON_DATABASE_URL = os.environ.get("NEON_DATABASE_URL", "")
@@ -1069,14 +1083,30 @@ if _saved_extra_admins:
         logger.info(f"Loaded {len(EXTRA_ADMIN_IDS)} extra admin(s) from DB")
     except Exception as e:
         logger.error(f"Failed to parse EXTRA_ADMIN_IDS from DB: {e}")
+_saved_bakong_relay = get_setting('BAKONG_RELAY_TOKEN')
+if _saved_bakong_relay:
+    BAKONG_RELAY_TOKEN = _saved_bakong_relay
+    logger.info(f"Loaded BAKONG_RELAY_TOKEN from DB: {BAKONG_RELAY_TOKEN[:10]}...")
+_saved_bakong_api = get_setting('BAKONG_API_TOKEN')
+if _saved_bakong_api:
+    BAKONG_API_TOKEN = _saved_bakong_api
+    logger.info(f"Loaded BAKONG_API_TOKEN from DB: {BAKONG_API_TOKEN[:10]}...")
+# Legacy single-token setting (backward compat)
 _saved_bakong = get_setting('BAKONG_TOKEN')
-if _saved_bakong:
-    BAKONG_TOKEN = _saved_bakong
+if _saved_bakong and not _saved_bakong_relay and not _saved_bakong_api:
+    if _saved_bakong.startswith('rbk'):
+        BAKONG_RELAY_TOKEN = _saved_bakong
+    else:
+        BAKONG_API_TOKEN = _saved_bakong
+    logger.info(f"Loaded BAKONG_TOKEN (legacy) from DB: {_saved_bakong[:10]}...")
+# Resolve active token: relay preferred, then original API
+BAKONG_TOKEN = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
+if BAKONG_TOKEN:
     try:
         khqr_client = KHQR(BAKONG_TOKEN)
     except Exception as e:
-        logger.error(f"Failed to rebuild KHQR client from saved token: {e}")
-    logger.info(f"Loaded BAKONG_TOKEN from DB: {BAKONG_TOKEN[:10]}...")
+        logger.error(f"Failed to rebuild KHQR client: {e}")
+    logger.info(f"Active BAKONG_TOKEN: {'relay' if BAKONG_TOKEN.startswith('rbk') else 'bakong'} ({BAKONG_TOKEN[:10]}...)")
 
 _saved_channel_id = get_setting('TELEGRAM_CHANNEL_ID')
 if _saved_channel_id:
@@ -1613,7 +1643,9 @@ BTN_BROADCAST       = '📢 ផ្សាយព័ត៌មាន'
 BTN_BACK_SETTINGS   = '↩️ ត្រឡប់ទៅកំណត់'
 
 BTN_PAYMENT_EDIT    = '✏️ ប្តូរឈ្មោះ Payment'
-BTN_BAKONG_EDIT     = '✏️ ប្តូរ Bakong Token'
+BTN_BAKONG_RELAY_EDIT = '✏️ ប្តូរ Relay Token'
+BTN_BAKONG_API_EDIT   = '✏️ ប្តូរ Bakong API Token'
+BTN_BAKONG_EDIT       = '✏️ ប្តូរ Bakong Token'
 BTN_CHANNEL_EDIT    = '✏️ ប្តូរ Channel ID'
 BTN_CHANNEL_CLEAR   = '🗑 លុប Channel ID'
 BTN_ADMIN_ADD       = '➕ បន្ថែម Admin'
@@ -1660,7 +1692,8 @@ PAYMENT_SUBMENU_KEYBOARD = {
 
 BAKONG_SUBMENU_KEYBOARD = {
     'keyboard': [
-        [{'text': BTN_BAKONG_EDIT}],
+        [{'text': BTN_BAKONG_RELAY_EDIT}],
+        [{'text': BTN_BAKONG_API_EDIT}],
         [{'text': BTN_BACK_SETTINGS}],
     ],
     'resize_keyboard': True,
@@ -1717,7 +1750,7 @@ ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
     BTN_BACK_SETTINGS,
-    BTN_PAYMENT_EDIT, BTN_BAKONG_EDIT,
+    BTN_PAYMENT_EDIT, BTN_BAKONG_EDIT, BTN_BAKONG_RELAY_EDIT, BTN_BAKONG_API_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR,
     BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
@@ -2042,9 +2075,16 @@ def _show_payment_inline(chat_id):
 
 
 def _show_bakong_inline(chat_id):
-    """Show the full bakong token with the bakong reply submenu."""
-    full = BAKONG_TOKEN if BAKONG_TOKEN else "(មិនទាន់កំណត់)"
-    text_msg = f"🔑 <b>Bakong Token បច្ចុប្បន្ន៖</b>\n<code>{html.escape(full)}</code>"
+    """Show both Bakong tokens with the bakong reply submenu."""
+    relay = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else "(មិនទាន់កំណត់)"
+    api   = BAKONG_API_TOKEN   if BAKONG_API_TOKEN   else "(មិនទាន់កំណត់)"
+    active_label = "Relay ✅" if BAKONG_RELAY_TOKEN else "Bakong API ✅"
+    text_msg = (
+        f"🔑 <b>Bakong Tokens បច្ចុប្បន្ន៖</b>\n\n"
+        f"🔵 <b>Relay Token:</b>\n<code>{html.escape(relay)}</code>\n\n"
+        f"🟠 <b>Bakong API Token:</b>\n<code>{html.escape(api)}</code>\n\n"
+        f"<i>Active: {active_label}</i>"
+    )
     send_message(chat_id, text_msg, parse_mode="HTML", reply_to_message_id=False,
                  reply_markup=BAKONG_SUBMENU_KEYBOARD)
 
@@ -2076,7 +2116,7 @@ def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
 
     Returns True if the input was consumed, False otherwise.
     """
-    global PAYMENT_NAME, BAKONG_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS
+    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS
 
     raw = (text or '').strip()
     cancel_words = {'បោះបង់', '🚫 បោះបង់'}
@@ -2111,19 +2151,34 @@ def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
                      parse_mode="HTML", reply_to_message_id=False, reply_markup=_main_kb(user_id))
         return True
 
-    if key == 'bakong':
+    if key in ('bakong', 'bakong_relay', 'bakong_api'):
         if not raw:
             send_message(chat_id, "សូមផ្ញើ Bakong token ថ្មី (ឬចុច 🚫 បោះបង់)", reply_to_message_id=False)
             return True
+        is_relay = raw.startswith('rbk') or key == 'bakong_relay'
+        # For relay token, no KHQR client validation needed (relay token isn't a JWT)
+        new_client = None
+        if not is_relay:
+            try:
+                new_client = KHQR(raw)
+            except Exception as e:
+                send_message(chat_id, f"❌ Token មិនត្រឹមត្រូវ៖ <code>{html.escape(str(e))}</code>",
+                             parse_mode="HTML", reply_to_message_id=False)
+                return True
+        if is_relay:
+            BAKONG_RELAY_TOKEN = raw
+            set_setting('BAKONG_RELAY_TOKEN', raw)
+            label = "Relay Token"
+        else:
+            BAKONG_API_TOKEN = raw
+            set_setting('BAKONG_API_TOKEN', raw)
+            label = "Bakong API Token"
+        # Rebuild active token: relay preferred
+        BAKONG_TOKEN = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
         try:
-            new_client = KHQR(raw)
-        except Exception as e:
-            send_message(chat_id, f"❌ Token មិនត្រឹមត្រូវ៖ <code>{html.escape(str(e))}</code>",
-                         parse_mode="HTML", reply_to_message_id=False)
-            return True
-        BAKONG_TOKEN = raw
-        khqr_client = new_client
-        set_setting('BAKONG_TOKEN', raw)
+            khqr_client = KHQR(BAKONG_TOKEN)
+        except Exception:
+            pass
         delete_message_async(chat_id, message_id)
         with _data_lock:
             if user_id in user_sessions:
@@ -2131,7 +2186,7 @@ def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
         save_sessions_async()
         send_message(
             chat_id,
-            f"✅ បានប្តូរ Bakong token (Prefix៖ <code>{html.escape(raw[:10])}…</code>)",
+            f"✅ បានប្តូរ <b>{label}</b> (Prefix៖ <code>{html.escape(raw[:10])}…</code>)",
             parse_mode="HTML", reply_to_message_id=False, reply_markup=_main_kb(user_id)
         )
         return True
@@ -2558,7 +2613,7 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
 
         # Admin: settings menu actions (⚙️កំណត់ keyboard)
         elif callback_data.startswith('adm:') and is_admin(user_id):
-            global PAYMENT_NAME, BAKONG_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, MAINTENANCE_MODE
+            global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, MAINTENANCE_MODE
             action = callback_data[4:]
             answer_callback(callback_query['id'])
             menu_msg_id = callback_query['message']['message_id']
@@ -2612,6 +2667,18 @@ def _handle_callback_query_locked(update, callback_query, chat_id,
                 delete_message_async(chat_id, menu_msg_id)
                 _prompt_admin_input(chat_id, user_id, 'bakong',
                                     "🔑 សូមផ្ញើ Bakong Token ថ្មី៖\n<i>(សារនឹងត្រូវលុបដោយស្វ័យប្រវត្តិ)</i>")
+                return
+
+            if action == 'bakong_relay_set':
+                delete_message_async(chat_id, menu_msg_id)
+                _prompt_admin_input(chat_id, user_id, 'bakong_relay',
+                                    "🔵 សូមផ្ញើ <b>Relay Token</b> ថ្មី (ចាប់ផ្ដើមមាន <code>rbk...</code>):\n<i>(សារនឹងត្រូវលុបដោយស្វ័យប្រវត្តិ)</i>")
+                return
+
+            if action == 'bakong_api_set':
+                delete_message_async(chat_id, menu_msg_id)
+                _prompt_admin_input(chat_id, user_id, 'bakong_api',
+                                    "🟠 សូមផ្ញើ <b>Bakong API Token</b> ថ្មី (JWT):\n<i>(សារនឹងត្រូវលុបដោយស្វ័យប្រវត្តិ)</i>")
                 return
 
             if action == 'channel':
@@ -3099,6 +3166,14 @@ def _handle_message_locked(update, message, chat_id, message_id, text, user, use
             if btn == BTN_BAKONG_EDIT:
                 _prompt_admin_input(chat_id, user_id, 'bakong',
                     "🔑 សូមផ្ញើ <b>Bakong Token</b> ថ្មី៖")
+                return
+            if btn == BTN_BAKONG_RELAY_EDIT:
+                _prompt_admin_input(chat_id, user_id, 'bakong_relay',
+                    "🔵 សូមផ្ញើ <b>Relay Token</b> ថ្មី (ចាប់ផ្ដើមមាន <code>rbk...</code>):")
+                return
+            if btn == BTN_BAKONG_API_EDIT:
+                _prompt_admin_input(chat_id, user_id, 'bakong_api',
+                    "🟠 សូមផ្ញើ <b>Bakong API Token</b> ថ្មី (JWT):")
                 return
             if btn == BTN_CHANNEL_EDIT:
                 _prompt_admin_input(chat_id, user_id, 'channel',
