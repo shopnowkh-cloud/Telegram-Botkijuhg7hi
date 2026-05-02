@@ -10,3 +10,9 @@ python-telegram-bot
 qrcode
 requests
 urllib3
+bakong-khqr
+pillow
+python-telegram-bot
+qrcode
+requests
+urllib3
