@@ -2262,8 +2262,7 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             ]
             rows_inline = [qty_buttons[i:i+5] for i in range(0, len(qty_buttons), 5)]
             rows_inline.append([InlineKeyboardButton("🚫 បោះបង់", callback_data="cancel_buy")])
-            await send_msg(chat_id, "*សូមជ្រើសរើសចំនួនដែលចង់ទិញ៖*",
-                           parse_mode=ParseMode.MARKDOWN,
+            await send_msg(chat_id, "<b>សូមជ្រើសរើសចំនួនដែលចង់ទិញ៖</b>",
                            reply_markup=InlineKeyboardMarkup(rows_inline))
             asyncio.create_task(delete_msg(chat_id, cq.message.id))
             return
