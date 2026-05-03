@@ -846,7 +846,11 @@ async def send_msg(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=None,
             kwargs["reply_to_message_id"] = reply_to_message_id
         if message_effect_id:
             kwargs["message_effect_id"] = message_effect_id
-        return await app.send_message(**kwargs)
+        try:
+            return await app.send_message(**kwargs)
+        except TypeError:
+            kwargs.pop("message_effect_id", None)
+            return await app.send_message(**kwargs)
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return await send_msg(chat_id, text, parse_mode, reply_markup, reply_to_message_id, message_effect_id)
