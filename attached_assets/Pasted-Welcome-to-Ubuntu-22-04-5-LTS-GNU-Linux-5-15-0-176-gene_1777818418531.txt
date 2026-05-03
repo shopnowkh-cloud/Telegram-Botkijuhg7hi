@@ -1,0 +1,43 @@
+Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-176-generic x86_64)
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+ System information as of Sun May  3 09:26:36 PM +07 2026
+  System load:  0.05               Processes:               158
+  Usage of /:   66.6% of 16.88GB   Users logged in:         0
+  Memory usage: 34%                IPv4 address for enp1s0: 10.1.28.32
+  Swap usage:   3%
+  => There is 1 zombie process.
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how
+MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+Expanded Security Maintenance for Applications is not enabled.
+0 updates can be applied immediately.
+2 additional security updates can be applied with ESM Apps.
+Learn more about enabling ESM Apps service at https://ubuntu.com/esm
+New release '24.04.4 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+*** System restart required ***
+Last login: Sun May  3 21:25:14 2026 from 36.37.142.149
+ubuntu@ubuntu:~$ cd ~/bot && git fetch origin && git reset --hard origin/master && pm2 restart telegram-bot
+remote: Enumerating objects: 31, done.
+remote: Counting objects: 100% (31/31), done.
+remote: Compressing objects: 100% (8/8), done.
+remote: Total 28 (delta 20), reused 28 (delta 20), pack-reused 0 (from 0)
+Unpacking objects: 100% (28/28), 6.98 KiB | 1.16 MiB/s, done.
+From https://github.com/shopnowkh-cloud/Telegram-Botkijuhg7hi
+   872a4f1..7980d59  master     -> origin/master
+HEAD is now at 7980d59 Update bot code and set up server environment
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [telegram-bot](ids: [ 1 ])
+[PM2] [telegram-bot](1) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ auto-reaction      │ fork     │ 31   │ errored   │ 0%       │
+0b       │
+│ 1  │ telegram-bot       │ fork     │ 4    │ online    │ 0%       │
+1.4mb    │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+ubuntu@ubuntu:~/bot$
