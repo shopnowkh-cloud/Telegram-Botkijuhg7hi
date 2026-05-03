@@ -2448,9 +2448,68 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
 
 
 # ── 19. Background periodic sweeper ──────────────────────────────────────────
+async def _check_active_pending_payments():
+    """Check all non-expired pending payments against Bakong API and deliver accounts if paid.
+    This handles cases where the bot restarted and lost the in-memory QR expiry polling tasks."""
+    try:
+        r = await run_sync(
+            _neon_query,
+            "SELECT user_id, chat_id, account_type, quantity, total_price, md5_hash, reserved_accounts "
+            "FROM bot_pending_payments "
+            "WHERE created_at + ($1 || ' seconds')::interval >= NOW()",
+            [str(PAYMENT_TIMEOUT_SECONDS)])
+        rows = r.get("rows", []) or []
+    except Exception as e:
+        logger.warning(f"Failed to query active pending payments: {e}")
+        return
+
+    for row in rows:
+        try:
+            user_id = int(row["user_id"])
+            async with _data_lock:
+                active_session = user_sessions.get(user_id)
+            if active_session and active_session.get("state") == "payment_pending":
+                continue
+
+            md5 = row.get("md5_hash")
+            if not md5:
+                continue
+
+            is_paid, payment_data = await run_sync(_check_payment_status, md5)
+            if not is_paid:
+                continue
+
+            reserved = row.get("reserved_accounts") or []
+            if isinstance(reserved, str):
+                try:
+                    reserved = json.loads(reserved)
+                except Exception:
+                    reserved = []
+
+            session = {
+                "state": "payment_pending",
+                "account_type": row.get("account_type"),
+                "quantity": int(row.get("quantity") or 1),
+                "total_price": float(row.get("total_price") or 0),
+                "md5_hash": md5,
+                "reserved_accounts": reserved,
+            }
+            chat_id = int(row.get("chat_id") or user_id)
+            logger.info(f"Sweeper detected paid payment for user {user_id}, delivering accounts")
+            await deliver_accounts(chat_id, user_id, session, payment_data=payment_data)
+            asyncio.create_task(run_sync(_delete_pending_payment, user_id))
+            asyncio.create_task(run_sync(_save_sessions))
+        except Exception as e:
+            logger.warning(f"Sweeper failed to process payment row {row}: {e}")
+
+
 async def _pending_payment_sweeper(interval: int = 60):
     while True:
         await asyncio.sleep(interval)
+        try:
+            await _check_active_pending_payments()
+        except Exception as e:
+            logger.warning(f"Active payment check failed: {e}")
         try:
             await run_sync(_cleanup_expired_pending_payments)
         except Exception as e:
