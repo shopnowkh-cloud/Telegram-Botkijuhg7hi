@@ -19,3 +19,11 @@ urllib3
 aiohttp
 pyrogram
 tgcrypto
+aiohttp
+bakong-khqr
+pillow
+pyrogram
+qrcode
+requests
+tgcrypto
+urllib3
