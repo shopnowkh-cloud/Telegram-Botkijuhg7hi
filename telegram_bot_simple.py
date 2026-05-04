@@ -63,6 +63,9 @@ BAKONG_API_TOKEN   = os.environ.get("BAKONG_TOKEN", "")
 BAKONG_TOKEN       = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
 khqr_client        = KHQR(BAKONG_TOKEN) if BAKONG_TOKEN else None
 
+DROPMAIL_API_TOKEN = os.environ.get("DROPMAIL_API_TOKEN", "")
+_DROPMAIL_URL      = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
+
 
 def is_admin(uid) -> bool:
     try:
@@ -216,6 +219,18 @@ def _init_db():
                 account_type TEXT, purchased_at TIMESTAMPTZ DEFAULT NOW()
             )""")
         _neon_query("""
+            CREATE TABLE IF NOT EXISTS email_history (
+                id BIGSERIAL PRIMARY KEY,
+                telegram_user_id BIGINT NOT NULL,
+                email_address TEXT NOT NULL,
+                dropmail_session_id TEXT,
+                address_id TEXT,
+                restore_key TEXT,
+                last_mail_id TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )""")
+        _neon_query("CREATE INDEX IF NOT EXISTS idx_email_history_user ON email_history(telegram_user_id)")
+        _neon_query("""
             INSERT INTO bot_known_users (user_id, first_seen, last_seen, admin_notified)
             SELECT DISTINCT user_id, MIN(purchased_at), MAX(purchased_at), TRUE
             FROM bot_purchase_history GROUP BY user_id
@@ -316,6 +331,180 @@ def _save_sessions():
         _neon_query(f"UPDATE bot_sessions SET data = '{encoded}'::jsonb")
     except Exception as e:
         logger.error(f"Failed to save sessions: {e}")
+
+
+# ── Dropmail GraphQL API (blocking, called via run_sync) ──────────────────────
+def _dropmail_gql(query: str, variables: dict = None) -> dict:
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    resp = http.post(_DROPMAIL_URL, json=payload, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _dropmail_create_session() -> dict:
+    q = """mutation { introduceSession {
+        id expiresAt
+        addresses { id address restoreKey }
+    } }"""
+    data = _dropmail_gql(q)
+    sess = data.get("data", {}).get("introduceSession")
+    if not sess:
+        return {}
+    addr = sess["addresses"][0] if sess.get("addresses") else {}
+    return {
+        "session_id": sess["id"],
+        "email":      addr.get("address"),
+        "address_id": addr.get("id"),
+        "restore_key": addr.get("restoreKey"),
+    }
+
+
+def _dropmail_restore_session(mail_address: str, restore_key: str) -> dict:
+    new_q = """mutation { introduceSession(input: { withAddress: false }) { id } }"""
+    data = _dropmail_gql(new_q)
+    new_sess = data.get("data", {}).get("introduceSession")
+    if not new_sess:
+        return {}
+    new_id = new_sess["id"]
+    restore_q = """mutation Restore($m:String!,$r:String!,$s:ID!) {
+        restoreAddress(input:{mailAddress:$m,restoreKey:$r,sessionId:$s}) {
+            id address restoreKey
+        }
+    }"""
+    r = _dropmail_gql(restore_q, {"m": mail_address, "r": restore_key, "s": new_id})
+    addr = r.get("data", {}).get("restoreAddress")
+    if not addr:
+        return {}
+    return {
+        "session_id":  new_id,
+        "email":       addr.get("address"),
+        "address_id":  addr.get("id"),
+        "restore_key": addr.get("restoreKey"),
+    }
+
+
+def _dropmail_get_mails(session_id: str, after_mail_id: str = None):
+    """Returns list of mails, or None if session expired."""
+    if after_mail_id:
+        q = """query G($id:ID!,$mid:ID!) {
+            session(id:$id){ mailsAfterId(mailId:$mid){id fromAddr toAddr headerSubject text} }
+        }"""
+        v = {"id": session_id, "mid": after_mail_id}
+    else:
+        q = """query G($id:ID!) {
+            session(id:$id){ mails{id fromAddr toAddr headerSubject text} }
+        }"""
+        v = {"id": session_id}
+    data = _dropmail_gql(q, v)
+    sess_data = data.get("data", {}).get("session")
+    if sess_data is None:
+        return None
+    return sess_data.get("mailsAfterId") or sess_data.get("mails") or []
+
+
+def _dropmail_delete_address(address_id: str) -> bool:
+    q = """mutation D($a:ID!) { deleteAddress(input:{addressId:$a}) }"""
+    try:
+        data = _dropmail_gql(q, {"a": address_id})
+        return bool(data.get("data", {}).get("deleteAddress"))
+    except Exception:
+        return False
+
+
+# ── Email history DB helpers (Neon HTTP API) ──────────────────────────────────
+def _email_history_add(user_id: int, email_address: str, session_id: str,
+                       address_id: str, restore_key: str):
+    try:
+        _neon_query("""
+            INSERT INTO email_history
+                (telegram_user_id, email_address, dropmail_session_id,
+                 address_id, restore_key)
+            VALUES ($1,$2,$3,$4,$5)
+        """, [str(user_id), email_address, session_id, address_id, restore_key])
+    except Exception as e:
+        logger.error(f"_email_history_add failed: {e}")
+
+
+def _email_history_list(user_id: int) -> list:
+    try:
+        r = _neon_query(
+            "SELECT email_address FROM email_history WHERE telegram_user_id=$1 ORDER BY created_at DESC",
+            [str(user_id)])
+        return [row["email_address"] for row in r.get("rows", [])]
+    except Exception as e:
+        logger.error(f"_email_history_list failed: {e}")
+        return []
+
+
+def _email_history_entries(user_id: int) -> list:
+    try:
+        r = _neon_query("""
+            SELECT id, telegram_user_id, email_address, dropmail_session_id,
+                   address_id, restore_key, last_mail_id
+            FROM email_history WHERE telegram_user_id=$1 ORDER BY created_at DESC
+        """, [str(user_id)])
+        return r.get("rows", [])
+    except Exception as e:
+        logger.error(f"_email_history_entries failed: {e}")
+        return []
+
+
+def _email_history_all_entries() -> list:
+    try:
+        r = _neon_query("""
+            SELECT id, telegram_user_id, email_address, dropmail_session_id,
+                   address_id, restore_key, last_mail_id
+            FROM email_history WHERE restore_key IS NOT NULL
+        """)
+        return r.get("rows", [])
+    except Exception as e:
+        logger.error(f"_email_history_all_entries failed: {e}")
+        return []
+
+
+def _email_history_delete(entry_id: int):
+    try:
+        _neon_query("DELETE FROM email_history WHERE id=$1", [str(entry_id)])
+    except Exception as e:
+        logger.error(f"_email_history_delete failed: {e}")
+
+
+def _email_history_update_session(entry_id: int, session_id: str,
+                                  address_id: str, restore_key: str):
+    try:
+        _neon_query("""
+            UPDATE email_history
+            SET dropmail_session_id=$1, address_id=$2, restore_key=$3, last_mail_id=NULL
+            WHERE id=$4
+        """, [session_id, address_id, restore_key, str(entry_id)])
+    except Exception as e:
+        logger.error(f"_email_history_update_session failed: {e}")
+
+
+def _email_history_update_last_mail(entry_id: int, mail_id: str):
+    try:
+        _neon_query("UPDATE email_history SET last_mail_id=$1 WHERE id=$2",
+                    [mail_id, str(entry_id)])
+    except Exception as e:
+        logger.error(f"_email_history_update_last_mail failed: {e}")
+
+
+def _email_history_get_by_email(user_id: int, email_address: str) -> dict:
+    try:
+        r = _neon_query("""
+            SELECT id, telegram_user_id, email_address, dropmail_session_id,
+                   address_id, restore_key, last_mail_id
+            FROM email_history
+            WHERE telegram_user_id=$1 AND email_address=$2
+            ORDER BY created_at DESC LIMIT 1
+        """, [str(user_id), email_address])
+        rows = r.get("rows", [])
+        return rows[0] if rows else {}
+    except Exception as e:
+        logger.error(f"_email_history_get_by_email failed: {e}")
+        return {}
 
 
 def _save_pending_payment(user_id, chat_id, session):
@@ -745,12 +934,19 @@ BTN_BROADCAST_CONFIRM = "✅ បញ្ជាក់ផ្សាយ"
 BTN_BROADCAST_CANCEL  = "🚫 បោះបង់ការផ្សាយ"
 ADMIN_SETTINGS_BTN    = "⚙️កំណត់"
 
+BTN_EMAIL_MGMT   = "📧 អ៊ីម៉ែល"
+BTN_EMAIL_NEW    = "✉️ អ៊ីម៉ែលថ្មី"
+BTN_EMAIL_INBOX  = "📥 ពិនិត្យប្រអប់"
+BTN_EMAIL_LIST   = "📓 បញ្ជីអ៊ីម៉ែល"
+BTN_EMAIL_DELETE = "🗑️ លុបអ៊ីម៉ែល"
+
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
     BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_RELAY_EDIT, BTN_BAKONG_API_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR, BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
+    BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_INBOX, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -769,6 +965,7 @@ ADMIN_SETTINGS_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_CHANNEL), KeyboardButton(BTN_ADMINS)],
     [KeyboardButton(BTN_BROADCAST)],
     [KeyboardButton(BTN_MAINTENANCE)],
+    [KeyboardButton(BTN_EMAIL_MGMT)],
 ], resize_keyboard=True, is_persistent=True)
 
 CANCEL_INPUT_KB = ReplyKeyboardMarkup(
@@ -809,6 +1006,12 @@ BROADCAST_CONFIRM_KB = ReplyKeyboardMarkup([
 
 BACK_SETTINGS_KB = ReplyKeyboardMarkup(
     [[KeyboardButton(BTN_BACK_SETTINGS)]], resize_keyboard=True, is_persistent=True)
+
+EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
+    [KeyboardButton(BTN_EMAIL_NEW),   KeyboardButton(BTN_EMAIL_INBOX)],
+    [KeyboardButton(BTN_EMAIL_LIST),  KeyboardButton(BTN_EMAIL_DELETE)],
+    [KeyboardButton(BTN_BACK_SETTINGS)],
+], resize_keyboard=True, is_persistent=True)
 
 CHECK_PAYMENT_INLINE = InlineKeyboardMarkup([
     [InlineKeyboardButton("🚫 បោះបង់", callback_data="cancel_purchase")]
@@ -1965,6 +2168,108 @@ async def on_broadcast_confirm(client, message):
             message.stop_propagation()
 
 
+# ─── Email sub-menu helpers ───────────────────────────────────────────────────
+async def _email_handle_new(chat_id: int, user_id: int):
+    if not DROPMAIL_API_TOKEN:
+        await send_msg(chat_id, "❌ DROPMAIL_API_TOKEN មិនទាន់កំណត់។", reply_markup=EMAIL_SUBMENU_KB)
+        return
+    await send_msg(chat_id, "⏳ កំពុងបង្កើតអ៊ីម៉ែលថ្មី…", reply_markup=EMAIL_SUBMENU_KB)
+    try:
+        result = await run_sync(_dropmail_create_session)
+    except Exception as e:
+        await send_msg(chat_id, f"❌ បង្កើតមិនបានទេ: <code>{html.escape(str(e))}</code>",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    if not result or not result.get("email"):
+        await send_msg(chat_id, "❌ មិនអាចបង្កើត session បានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    await run_sync(_email_history_add, user_id, result["email"],
+                   result.get("session_id", ""), result.get("address_id", ""),
+                   result.get("restore_key", ""))
+    await send_msg(chat_id,
+                   f"✅ <b>អ៊ីម៉ែលថ្មីបានបង្កើត!</b>\n\n"
+                   f"📧 <code>{result['email']}</code>\n\n"
+                   f"👆 ចុចលើអ៊ីម៉ែលដើម្បីចម្លង។ Bot នឹងជូនដំណឹងភ្លាមៗពីសំបុត្រថ្មី។",
+                   reply_markup=EMAIL_SUBMENU_KB)
+
+
+async def _email_handle_inbox(chat_id: int, user_id: int):
+    entries = await run_sync(_email_history_entries, user_id)
+    if not entries:
+        await send_msg(chat_id,
+                       "📭 មិនទាន់មានអ៊ីម៉ែលទេ។ ចុច <b>✉️ អ៊ីម៉ែលថ្មី</b> ដើម្បីបង្កើត។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    entry = entries[0]
+    session_id = entry.get("dropmail_session_id")
+    if not session_id:
+        await send_msg(chat_id, "❌ Session ID ត្រូវបានបាត់។ សូមបង្កើតអ៊ីម៉ែលថ្មី។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    await send_msg(chat_id, "⏳ កំពុងពិនិត្យប្រអប់…", reply_markup=EMAIL_SUBMENU_KB)
+    try:
+        mails = await run_sync(_dropmail_get_mails, session_id, None)
+    except Exception as e:
+        await send_msg(chat_id, f"❌ កំហុសក្នុងការពិនិត្យ: <code>{html.escape(str(e))}</code>",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    email_addr = entry.get("email_address", "?")
+    if mails is None:
+        await send_msg(chat_id,
+                       f"⚠️ Session ផុតកំណត់។\n📧 <code>{email_addr}</code>\n\n"
+                       f"Bot នឹងស្តារវិញដោយស្វ័យប្រវត្តិ។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    if not mails:
+        await send_msg(chat_id,
+                       f"📭 <b>ប្រអប់ទទេ</b>\n\n📧 <code>{email_addr}</code>\n\n"
+                       f"មិនទាន់មានអ៊ីម៉ែលចូលទេ។ Bot នឹងជូនដំណឹងភ្លាមៗ។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    text = f"📬 <b>ប្រអប់ — {len(mails)} សំបុត្រ</b>\n📧 <code>{email_addr}</code>\n\n"
+    for i, mail in enumerate(mails[-5:], 1):
+        subject   = mail.get("headerSubject") or "(គ្មានប្រធានបទ)"
+        from_addr = mail.get("fromAddr") or "unknown"
+        body      = (mail.get("text") or "").strip()
+        preview   = body[:200] + "…" if len(body) > 200 else body
+        text += (
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"<b>#{i} {html.escape(subject)}</b>\n"
+            f"From: <code>{html.escape(from_addr)}</code>\n"
+            f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n\n"
+        )
+    await send_msg(chat_id, text, reply_markup=EMAIL_SUBMENU_KB)
+
+
+async def _email_handle_list(chat_id: int, user_id: int):
+    emails = await run_sync(_email_history_list, user_id)
+    if not emails:
+        await send_msg(chat_id,
+                       "📭 មិនទាន់មានអ៊ីម៉ែលទេ។ ចុច <b>✉️ អ៊ីម៉ែលថ្មី</b> ដើម្បីបង្កើត។",
+                       reply_markup=EMAIL_SUBMENU_KB)
+        return
+    lines = "\n".join(f"{i+1}. <code>{em}</code>" for i, em in enumerate(emails))
+    await send_msg(chat_id,
+                   f"📧 <b>បញ្ជីអ៊ីម៉ែល ({len(emails)})</b>\n\n{lines}",
+                   reply_markup=EMAIL_SUBMENU_KB)
+
+
+async def _email_handle_delete_picker(chat_id: int, user_id: int):
+    entries = await run_sync(_email_history_entries, user_id)
+    if not entries:
+        await send_msg(chat_id, "📭 មិនទាន់មានអ៊ីម៉ែលទេ។", reply_markup=EMAIL_SUBMENU_KB)
+        return
+    buttons = [
+        [InlineKeyboardButton(f"🗑 {e['email_address']}",
+                              callback_data=f"del_em:{e['id']}:{e.get('address_id','')}"
+                              )]
+        for e in entries
+    ]
+    await send_msg(chat_id, "ជ្រើសរើសអ៊ីម៉ែលដែលចង់លុប៖",
+                   reply_markup=InlineKeyboardMarkup(buttons))
+
+
 # ─── group 4: Admin keyboard button labels ────────────────────────────────────
 @app.on_message(filters.private & admin_button_filter, group=4)
 async def on_admin_button(client, message):
@@ -2040,6 +2345,24 @@ async def on_admin_button(client, message):
             MAINTENANCE_MODE = False
             await run_sync(_set_setting, "MAINTENANCE_MODE", "false")
             await send_msg(chat_id, "🟢 បានបើក Bot", reply_markup=ADMIN_SETTINGS_KB)
+        elif btn == BTN_EMAIL_MGMT:
+            if not DROPMAIL_API_TOKEN:
+                await send_msg(chat_id,
+                    "❌ <b>DROPMAIL_API_TOKEN</b> មិនទាន់កំណត់។\n\n"
+                    "សូមបន្ថែម secret <code>DROPMAIL_API_TOKEN</code> ទៅក្នុង Replit Secrets ជាមុន។",
+                    reply_markup=ADMIN_SETTINGS_KB)
+            else:
+                await send_msg(chat_id,
+                    "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
+                    reply_markup=EMAIL_SUBMENU_KB)
+        elif btn == BTN_EMAIL_NEW:
+            await _email_handle_new(chat_id, user_id)
+        elif btn == BTN_EMAIL_INBOX:
+            await _email_handle_inbox(chat_id, user_id)
+        elif btn == BTN_EMAIL_LIST:
+            await _email_handle_list(chat_id, user_id)
+        elif btn == BTN_EMAIL_DELETE:
+            await _email_handle_delete_picker(chat_id, user_id)
     message.stop_propagation()
 
 
@@ -2447,6 +2770,21 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             await show_account_selection(chat_id)
             return
 
+        # ── Email delete (admin only) ─────────────────────────────────────────
+        if data.startswith("del_em:") and is_admin(user_id):
+            await cq.answer()
+            parts = data.split(":", 2)
+            entry_id   = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+            address_id = parts[2] if len(parts) > 2 else ""
+            if not entry_id:
+                await cq.message.edit_text("❌ ព័ត៌មានមិនត្រឹមត្រូវ។")
+                return
+            if address_id:
+                await run_sync(_dropmail_delete_address, address_id)
+            await run_sync(_email_history_delete, entry_id)
+            await cq.message.edit_text("🗑 <b>លុបអ៊ីម៉ែលបានសម្រេច។</b>", parse_mode=ParseMode.HTML)
+            return
+
     except Exception as e:
         logger.error(f"Callback handler error for user {user_id}: {e}")
 
@@ -2518,6 +2856,75 @@ async def _pending_payment_sweeper(interval: int = 60):
             await run_sync(_cleanup_expired_pending_payments)
         except Exception as e:
             logger.warning(f"Sweeper iteration failed: {e}")
+
+
+async def _email_poller(interval: int = 10):
+    """Background task: polls all email_history entries for new mail and notifies the admin."""
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            if not DROPMAIL_API_TOKEN:
+                continue
+            entries = await run_sync(_email_history_all_entries)
+            for entry in entries:
+                entry_id    = entry.get("id")
+                user_id     = int(entry.get("telegram_user_id") or 0)
+                email_addr  = entry.get("email_address", "")
+                session_id  = entry.get("dropmail_session_id")
+                restore_key = entry.get("restore_key")
+                last_mail_id = entry.get("last_mail_id")
+                if not session_id:
+                    continue
+                try:
+                    mails = await run_sync(_dropmail_get_mails, session_id, last_mail_id)
+                except Exception as e:
+                    logger.debug(f"[email_poller] poll error [{email_addr}]: {e}")
+                    continue
+                if mails is None:
+                    if not restore_key:
+                        continue
+                    try:
+                        restored = await run_sync(_dropmail_restore_session, email_addr, restore_key)
+                        if restored and restored.get("session_id"):
+                            await run_sync(_email_history_update_session, entry_id,
+                                           restored["session_id"],
+                                           restored.get("address_id", ""),
+                                           restored.get("restore_key", ""))
+                            logger.info(f"[email_poller] Restored [{email_addr}] → {restored['session_id']}")
+                    except Exception as e:
+                        logger.debug(f"[email_poller] restore error [{email_addr}]: {e}")
+                    continue
+                if not mails:
+                    continue
+                newest_id = None
+                for mail in mails:
+                    mail_id   = mail.get("id")
+                    if last_mail_id and mail_id == last_mail_id:
+                        continue
+                    subject   = mail.get("headerSubject") or "(គ្មានប្រធានបទ)"
+                    from_addr = mail.get("fromAddr") or "unknown"
+                    to_addr   = mail.get("toAddr") or email_addr
+                    body      = (mail.get("text") or "").strip()
+                    preview   = body[:800] + "\n…" if len(body) > 800 else body
+                    text = (
+                        f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
+                        f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n"
+                        f"👤 ពី: <code>{html.escape(from_addr)}</code>\n"
+                        f"📝 ប្រធានបទ: <b>{html.escape(subject)}</b>\n\n"
+                        f"{'─' * 28}\n"
+                        f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}"
+                    )
+                    try:
+                        await send_msg(user_id, text)
+                    except Exception as e:
+                        logger.warning(f"[email_poller] notify user {user_id} failed: {e}")
+                    newest_id = mail_id
+                if newest_id:
+                    await run_sync(_email_history_update_last_mail, entry_id, newest_id)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[email_poller] outer error: {e}")
 
 
 async def _resume_scheduled_deletions():
@@ -2608,6 +3015,8 @@ async def _on_startup():
     await run_sync(_cleanup_expired_pending_payments)
     asyncio.create_task(_pending_payment_sweeper(60))
     logger.info("Pending-payment sweeper started (every 60s)")
+    asyncio.create_task(_email_poller(10))
+    logger.info("Email poller started (every 10s)")
 
     me = await app.get_me()
     logger.info(f"Bot connected: @{me.username}")
