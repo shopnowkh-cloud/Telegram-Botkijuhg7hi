@@ -6,6 +6,12 @@ Architecture: Pyrogram (MTProto) | Full asyncio | Priority handlers | Memory cac
 """
 
 # ── 1. Imports ───────────────────────────────────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import asyncio
 import hashlib
 import html
