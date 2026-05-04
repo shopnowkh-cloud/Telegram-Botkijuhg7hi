@@ -959,7 +959,7 @@ ADMIN_BUTTON_LABELS = {
     BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_RELAY_EDIT, BTN_BAKONG_API_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR, BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
-    BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_INBOX, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
+    BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -971,14 +971,12 @@ ADMIN_KB = ReplyKeyboardMarkup(
     resize_keyboard=True, is_persistent=True)
 
 ADMIN_SETTINGS_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_ADD_ACCOUNT), KeyboardButton(BTN_DELETE_TYPE)],
-    [KeyboardButton(BTN_STOCK)],
-    [KeyboardButton(BTN_USERS), KeyboardButton(BTN_BUYERS)],
-    [KeyboardButton(BTN_PAYMENT), KeyboardButton(BTN_BAKONG)],
-    [KeyboardButton(BTN_CHANNEL), KeyboardButton(BTN_ADMINS)],
-    [KeyboardButton(BTN_BROADCAST)],
-    [KeyboardButton(BTN_MAINTENANCE)],
-    [KeyboardButton(BTN_EMAIL_MGMT)],
+    [KeyboardButton(BTN_ADD_ACCOUNT),  KeyboardButton(BTN_DELETE_TYPE)],
+    [KeyboardButton(BTN_STOCK),        KeyboardButton(BTN_BUYERS)],
+    [KeyboardButton(BTN_USERS),        KeyboardButton(BTN_EMAIL_MGMT)],
+    [KeyboardButton(BTN_PAYMENT),      KeyboardButton(BTN_BAKONG)],
+    [KeyboardButton(BTN_CHANNEL),      KeyboardButton(BTN_ADMINS)],
+    [KeyboardButton(BTN_MAINTENANCE),  KeyboardButton(BTN_BROADCAST)],
 ], resize_keyboard=True, is_persistent=True)
 
 CANCEL_INPUT_KB = ReplyKeyboardMarkup(
@@ -1021,8 +1019,8 @@ BACK_SETTINGS_KB = ReplyKeyboardMarkup(
     [[KeyboardButton(BTN_BACK_SETTINGS)]], resize_keyboard=True, is_persistent=True)
 
 EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_EMAIL_NEW),   KeyboardButton(BTN_EMAIL_INBOX)],
-    [KeyboardButton(BTN_EMAIL_LIST),  KeyboardButton(BTN_EMAIL_DELETE)],
+    [KeyboardButton(BTN_EMAIL_NEW),   KeyboardButton(BTN_EMAIL_LIST)],
+    [KeyboardButton(BTN_EMAIL_DELETE)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
@@ -2373,8 +2371,6 @@ async def on_admin_button(client, message):
                     reply_markup=EMAIL_SUBMENU_KB)
         elif btn == BTN_EMAIL_NEW:
             await _email_handle_new(chat_id, user_id)
-        elif btn == BTN_EMAIL_INBOX:
-            await _email_handle_inbox(chat_id, user_id)
         elif btn == BTN_EMAIL_LIST:
             await _email_handle_list(chat_id, user_id)
         elif btn == BTN_EMAIL_DELETE:
