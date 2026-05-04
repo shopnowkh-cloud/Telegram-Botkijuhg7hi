@@ -413,6 +413,31 @@ def _dropmail_delete_address(address_id: str) -> bool:
         return False
 
 
+def _dropmail_check_token_info() -> dict:
+    """Query Dropmail API to verify token validity and get expiry info."""
+    try:
+        # Try tokenInfo query first
+        q = """query { tokenInfo { expiresAt requestsRemaining } }"""
+        data = _dropmail_gql(q)
+        info = data.get("data", {}).get("tokenInfo") or {}
+        if info:
+            raw_exp = info.get("expiresAt") or "N/A"
+            remaining = info.get("requestsRemaining")
+            return {
+                "valid": True,
+                "expires": raw_exp,
+                "remaining": remaining,
+            }
+        # Fallback: just test connectivity with __typename
+        q2 = """query { __typename }"""
+        data2 = _dropmail_gql(q2)
+        if data2.get("data"):
+            return {"valid": True, "expires": "N/A", "remaining": None}
+        return {"valid": False, "expires": "N/A", "remaining": None}
+    except Exception as e:
+        return {"valid": False, "expires": "N/A", "remaining": None, "error": str(e)}
+
+
 # ── Email history DB helpers (Neon HTTP API) ──────────────────────────────────
 def _email_history_add(user_id: int, email_address: str, session_id: str,
                        address_id: str, restore_key: str):
@@ -947,11 +972,13 @@ BTN_BROADCAST_CONFIRM = "✅ បញ្ជាក់ផ្សាយ"
 BTN_BROADCAST_CANCEL  = "🚫 បោះបង់ការផ្សាយ"
 ADMIN_SETTINGS_BTN    = "⚙️កំណត់"
 
-BTN_EMAIL_MGMT   = "📧 អ៊ីម៉ែល"
-BTN_EMAIL_NEW    = "✉️ អ៊ីម៉ែលថ្មី"
-BTN_EMAIL_INBOX  = "📥 ពិនិត្យប្រអប់"
-BTN_EMAIL_LIST   = "📓 បញ្ជីអ៊ីម៉ែល"
-BTN_EMAIL_DELETE = "🗑️ លុបអ៊ីម៉ែល"
+BTN_EMAIL_MGMT        = "📧 អ៊ីម៉ែល"
+BTN_EMAIL_NEW         = "✉️ អ៊ីម៉ែលថ្មី"
+BTN_EMAIL_INBOX       = "📥 ពិនិត្យប្រអប់"
+BTN_EMAIL_LIST        = "📓 បញ្ជីអ៊ីម៉ែល"
+BTN_EMAIL_DELETE      = "🗑️ លុបអ៊ីម៉ែល"
+BTN_EMAIL_TOKEN_EDIT  = "✏️ ប្តូរ Dropmail Token"
+BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
@@ -960,6 +987,7 @@ ADMIN_BUTTON_LABELS = {
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR, BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
+    BTN_EMAIL_TOKEN_EDIT, BTN_EMAIL_TOKEN_INFO,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -1019,8 +1047,9 @@ BACK_SETTINGS_KB = ReplyKeyboardMarkup(
     [[KeyboardButton(BTN_BACK_SETTINGS)]], resize_keyboard=True, is_persistent=True)
 
 EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_EMAIL_NEW),   KeyboardButton(BTN_EMAIL_LIST)],
+    [KeyboardButton(BTN_EMAIL_NEW),         KeyboardButton(BTN_EMAIL_LIST)],
     [KeyboardButton(BTN_EMAIL_DELETE)],
+    [KeyboardButton(BTN_EMAIL_TOKEN_EDIT),  KeyboardButton(BTN_EMAIL_TOKEN_INFO)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
@@ -1711,7 +1740,7 @@ async def _show_maintenance_inline(chat_id):
 
 
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
-    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS
+    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, _DROPMAIL_URL
     raw = (text or "").strip()
     cancel_words = {"បោះបង់", "🚫 បោះបង់"}
     if raw in cancel_words or raw == BTN_BACK_SETTINGS:
@@ -1818,6 +1847,24 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
             user_sessions.pop(user_id, None)
         asyncio.create_task(run_sync(_save_sessions))
         await send_msg(chat_id, msg, reply_markup=_main_kb(user_id))
+        return True
+
+    if key == "dropmail_token":
+        if not raw:
+            await send_msg(chat_id, "🔑 សូមផ្ញើ <b>Dropmail API Token</b> ថ្មី (ឬចុច 🚫 បោះបង់)")
+            return True
+        DROPMAIL_API_TOKEN = raw
+        _DROPMAIL_URL = f"https://dropmail.me/api/graphql/{raw}"
+        await run_sync(_set_setting, "DROPMAIL_API_TOKEN", raw)
+        asyncio.create_task(delete_msg(chat_id, message_id))
+        async with _data_lock:
+            user_sessions.pop(user_id, None)
+        asyncio.create_task(run_sync(_save_sessions))
+        await send_msg(
+            chat_id,
+            f"✅ បានប្តូរ <b>Dropmail API Token</b>\n"
+            f"Prefix: <code>{html.escape(raw[:8])}…</code>",
+            reply_markup=EMAIL_SUBMENU_KB)
         return True
 
     if key == "broadcast":
@@ -2306,6 +2353,38 @@ async def _email_handle_list(chat_id: int, user_id: int):
                    reply_markup=EMAIL_SUBMENU_KB)
 
 
+async def _email_show_token_info(chat_id: int):
+    if not DROPMAIL_API_TOKEN:
+        await send_msg(
+            chat_id,
+            "❌ <b>Dropmail Token</b> មិនទាន់កំណត់ទេ។\n"
+            "ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីកំណត់ token ។",
+            reply_markup=EMAIL_SUBMENU_KB)
+        return
+    masked = DROPMAIL_API_TOKEN[:6] + "…" + DROPMAIL_API_TOKEN[-4:]
+    await send_msg(chat_id, "⏳ កំពុងពិនិត្យ token…", reply_markup=EMAIL_SUBMENU_KB)
+    info = await run_sync(_dropmail_check_token_info)
+    if info.get("valid"):
+        status_icon = "✅ Active"
+        expires_val = info.get("expires") or "N/A"
+        remaining_val = info.get("remaining")
+        remaining_line = f"\n📊 Requests remaining: <b>{remaining_val}</b>" if remaining_val is not None else ""
+        expires_line   = f"\n📅 Expire: <b>{html.escape(str(expires_val))}</b>" if expires_val != "N/A" else "\n📅 Expire: <b>N/A</b>"
+    else:
+        status_icon = "❌ Invalid / Error"
+        err = info.get("error", "")
+        expires_line  = f"\n⚠️ <code>{html.escape(err[:80])}</code>" if err else ""
+        remaining_line = ""
+    text = (
+        f"🔑 <b>Dropmail Token Info</b>\n\n"
+        f"Token: <code>{html.escape(masked)}</code>\n"
+        f"Status: {status_icon}"
+        f"{expires_line}"
+        f"{remaining_line}"
+    )
+    await send_msg(chat_id, text, reply_markup=EMAIL_SUBMENU_KB)
+
+
 async def _email_handle_delete_picker(chat_id: int, user_id: int):
     entries = await run_sync(_email_history_entries, user_id)
     if not entries:
@@ -2411,6 +2490,13 @@ async def on_admin_button(client, message):
             await _email_handle_list(chat_id, user_id)
         elif btn == BTN_EMAIL_DELETE:
             await _email_handle_delete_picker(chat_id, user_id)
+        elif btn == BTN_EMAIL_TOKEN_EDIT:
+            await _prompt_admin_input(
+                chat_id, user_id, "dropmail_token",
+                "🔑 សូមផ្ញើ <b>Dropmail API Token</b> ថ្មី:\n\n"
+                "<i>⚠️ Token នឹងត្រូវបានលុបចោលស្វ័យប្រវត្តិ — ផ្ញើដោយប្រុងប្រយ័ត្ន!</i>")
+        elif btn == BTN_EMAIL_TOKEN_INFO:
+            await _email_show_token_info(chat_id)
     message.stop_propagation()
 
 
@@ -3039,6 +3125,12 @@ async def _on_startup():
     if _sv:
         CHANNEL_ID = _sv.strip()
         logger.info(f"Loaded TELEGRAM_CHANNEL_ID: {CHANNEL_ID}")
+
+    _sv = await run_sync(_get_setting, "DROPMAIL_API_TOKEN")
+    if _sv:
+        DROPMAIL_API_TOKEN = _sv
+        _DROPMAIL_URL = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
+        logger.info(f"Loaded DROPMAIL_API_TOKEN from DB: {DROPMAIL_API_TOKEN[:6]}…")
 
     # Load data and sessions into memory
     data = await run_sync(_load_data)
