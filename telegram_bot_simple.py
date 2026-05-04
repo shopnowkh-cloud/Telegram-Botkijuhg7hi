@@ -1982,9 +1982,10 @@ maintenance_block_filter  = _make_maintenance_block_filter()
 has_admin_input_filter    = _make_has_admin_input_session_filter()
 admin_button_filter       = _make_admin_button_filter()
 payment_pending_filter    = _make_payment_pending_filter()
-delete_type_select_filter = _make_has_admin_state_filter("delete_type_select")
+delete_type_select_filter  = _make_has_admin_state_filter("delete_type_select")
 delete_type_confirm_filter = _make_has_admin_state_filter("delete_type_confirm")
-broadcast_confirm_filter  = _make_has_admin_state_filter("broadcast_confirm")
+broadcast_confirm_filter   = _make_has_admin_state_filter("broadcast_confirm")
+email_delete_picker_filter = _make_has_admin_state_filter("email_delete_picker")
 
 
 # ── 18. Handlers — Priority via group parameter (lower = higher priority) ─────
@@ -2179,6 +2180,45 @@ async def on_broadcast_confirm(client, message):
             message.stop_propagation()
 
 
+# ─── group 3: Admin email_delete_picker state ─────────────────────────────────
+@app.on_message(filters.private & email_delete_picker_filter, group=3)
+async def on_email_delete_picker(client, message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text    = (message.text or "").strip()
+    async with get_user_lock(user_id):
+        if text == BTN_BACK_SETTINGS:
+            async with _data_lock:
+                user_sessions.pop(user_id, None)
+            asyncio.create_task(run_sync(_save_sessions))
+            await send_msg(chat_id, "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
+                           reply_markup=EMAIL_SUBMENU_KB)
+            message.stop_propagation()
+            return
+        # Try to match tapped email address
+        entry = await run_sync(_email_history_get_by_email, user_id, text)
+        if not entry:
+            await send_msg(chat_id, "❌ មិនឃើញអ៊ីម៉ែលនេះទេ។", reply_markup=EMAIL_SUBMENU_KB)
+            async with _data_lock:
+                user_sessions.pop(user_id, None)
+            asyncio.create_task(run_sync(_save_sessions))
+            message.stop_propagation()
+            return
+        address_id = entry.get("address_id", "")
+        entry_id   = entry.get("id")
+        if address_id:
+            await run_sync(_dropmail_delete_address, address_id)
+        if entry_id:
+            await run_sync(_email_history_delete, entry_id)
+        async with _data_lock:
+            user_sessions.pop(user_id, None)
+        asyncio.create_task(run_sync(_save_sessions))
+        await send_msg(chat_id,
+                       f"✅ <b>លុបអ៊ីម៉ែលបានសម្រេច។</b>\n<code>{html.escape(text)}</code>",
+                       reply_markup=EMAIL_SUBMENU_KB)
+    message.stop_propagation()
+
+
 # ─── Email sub-menu helpers ───────────────────────────────────────────────────
 async def _email_handle_new(chat_id: int, user_id: int):
     if not DROPMAIL_API_TOKEN:
@@ -2271,17 +2311,13 @@ async def _email_handle_delete_picker(chat_id: int, user_id: int):
     if not entries:
         await send_msg(chat_id, "📭 មិនទាន់មានអ៊ីម៉ែលទេ។", reply_markup=EMAIL_SUBMENU_KB)
         return
-    buttons = [
-        [InlineKeyboardButton(f"🗑 {e['email_address']}",
-                              callback_data=f"del_em:{e['id']}"
-                              )]
-        for e in entries
-    ]
-    buttons.append([InlineKeyboardButton("🔙 ត្រឡប់", callback_data="email_menu_back")])
-    # Dismiss the persistent reply keyboard first, then show inline picker
-    await send_msg(chat_id, "⬇️", reply_markup=ReplyKeyboardRemove())
-    await send_msg(chat_id, "🗑 <b>ជ្រើសរើសអ៊ីម៉ែលដែលចង់លុប៖</b>",
-                   reply_markup=InlineKeyboardMarkup(buttons))
+    async with _data_lock:
+        user_sessions[user_id] = {"state": "email_delete_picker"}
+    asyncio.create_task(run_sync(_save_sessions))
+    rows = [[KeyboardButton(e['email_address'])] for e in entries]
+    rows.append([KeyboardButton(BTN_BACK_SETTINGS)])
+    kb = ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
+    await send_msg(chat_id, "🗑 <b>ជ្រើសរើសអ៊ីម៉ែលដែលចង់លុប៖</b>", reply_markup=kb)
 
 
 # ─── group 4: Admin keyboard button labels ────────────────────────────────────
@@ -2782,30 +2818,6 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             await show_account_selection(chat_id)
             return
 
-        # ── Email delete (admin only) ─────────────────────────────────────────
-        if data == "email_menu_back" and is_admin(user_id):
-            await cq.answer()
-            await cq.message.delete()
-            await send_msg(chat_id, "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
-                           reply_markup=EMAIL_SUBMENU_KB)
-            return
-
-        if data.startswith("del_em:") and is_admin(user_id):
-            await cq.answer()
-            parts = data.split(":", 1)
-            entry_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
-            if not entry_id:
-                await cq.message.edit_text("❌ ព័ត៌មានមិនត្រឹមត្រូវ។")
-                return
-            entry = await run_sync(_email_history_get_by_id, entry_id)
-            address_id = entry.get("address_id", "")
-            if address_id:
-                await run_sync(_dropmail_delete_address, address_id)
-            await run_sync(_email_history_delete, entry_id)
-            await cq.message.edit_text("✅ <b>លុបអ៊ីម៉ែលបានសម្រេច។</b>", parse_mode=ParseMode.HTML)
-            await send_msg(chat_id, "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
-                           reply_markup=EMAIL_SUBMENU_KB)
-            return
 
     except Exception as e:
         logger.error(f"Callback handler error for user {user_id}: {e}")
