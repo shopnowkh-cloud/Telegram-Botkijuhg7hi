@@ -2476,9 +2476,9 @@ async def on_admin_button(client, message):
         elif btn == BTN_EMAIL_MGMT:
             if not DROPMAIL_API_TOKEN:
                 await send_msg(chat_id,
-                    "❌ <b>DROPMAIL_API_TOKEN</b> មិនទាន់កំណត់។\n\n"
-                    "សូមបន្ថែម secret <code>DROPMAIL_API_TOKEN</code> ទៅក្នុង Replit Secrets ជាមុន។",
-                    reply_markup=ADMIN_SETTINGS_KB)
+                    "⚠️ <b>DROPMAIL_API_TOKEN</b> មិនទាន់កំណត់។\n\n"
+                    "ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីកំណត់ token ។",
+                    reply_markup=EMAIL_SUBMENU_KB)
             else:
                 await send_msg(chat_id,
                     "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
