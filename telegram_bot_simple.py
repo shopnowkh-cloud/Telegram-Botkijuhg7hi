@@ -312,8 +312,8 @@ def _load_sessions():
 def _save_sessions():
     try:
         payload = {str(k): v for k, v in user_sessions.items()}
-        _neon_query("UPDATE bot_sessions SET data = $1",
-                    [json.dumps(payload, ensure_ascii=False)])
+        encoded = json.dumps(payload, ensure_ascii=False).replace("'", "''")
+        _neon_query(f"UPDATE bot_sessions SET data = '{encoded}'::jsonb")
     except Exception as e:
         logger.error(f"Failed to save sessions: {e}")
 
