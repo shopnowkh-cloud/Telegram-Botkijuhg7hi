@@ -1,0 +1,53 @@
+Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-176-generic x
+86_64)
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+ System information as of Mon May  4 12:52:27 PM +07 2026
+  System load:  0.56               Processes:               1
+59
+  Usage of /:   68.5% of 16.88GB   Users logged in:         0
+  Memory usage: 37%                IPv4 address for enp1s0: 1
+0.1.28.32
+  Swap usage:   3%
+  => There is 1 zombie process.
+ * Strictly confined Kubernetes makes edge and IoT secure. Le
+arn how MicroK8s
+   just raised the bar for easy, resilient and secure K8s clu
+ster deployment.
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+Expanded Security Maintenance for Applications is not enabled
+.
+0 updates can be applied immediately.
+2 additional security updates can be applied with ESM Apps.
+Learn more about enabling ESM Apps service at https://ubuntu.
+com/esm
+New release '24.04.4 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+*** System restart required ***
+Last login: Mon May  4 12:45:00 2026 from 36.37.142.88
+ubuntu@ubuntu:~$ cd /path/to/bot
+git pull origin main
+pip3 install -r requirements.txt
+pkill -f telegram_bot_simple.py
+nohup python3 telegram_bot_simple.py &
+-bash: cd: /path/to/bot: No such file or directory
+fatal: not a git repository (or any of the parent directories): .git
+Defaulting to user installation because normal site-packages is not writeable
+ERROR: Could not open requirements file: [Errno 2] No such file or directory: 'requirements.txt'
+[1] 670928
+ubuntu@ubuntu:~$ nohup: ignoring input and appending output to 'nohup.out'
+ubuntu@ubuntu:~$ find / -name "telegram_bot_simple.py" 2>/dev/null
+^[[A/home/ubuntu/TelegramOrderBot/telegram_bot_simple.py
+/home/ubuntu/Telegram-Botkijuhg7hi/telegram_bot_simple.py
+/home/ubuntu/bot/telegram_bot_simple.py
+/home/ubuntu/order-bot/telegram_bot_simple.py
+[1]+  Exit 2                  nohup python3 telegram_bot_simple.py
+ubuntu@ubuntu:~$ nohup python3 telegram_bot_simple.py &mkdir -p ~/bot[1] 670998
+nohup: ignoring input and appending output to 'nohup.out'
+[1]+  Exit 2                  nohup python3 telegram_bot_simple.py
+ubuntu@ubuntu:~$ ps aux | grep telegram_bot_simple.py
+ubuntu    670931  0.7  3.6 225232 69208 ?        Ssl  13:30   0:00 /usr/bin/python3 telegram_bot_simple.py
+ubuntu    670937  0.7  3.6 298964 69108 ?        Ssl  13:30   0:00 python3 /home/ubuntu/bot/telegram_bot_simple.py
+ubuntu    671028  0.0  0.1   6624  2188 pts/0    S+   13:32   0:00 grep --color=auto telegram_bot_simple.py
+ubuntu@ubuntu:~$
