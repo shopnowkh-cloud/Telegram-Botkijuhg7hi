@@ -2279,7 +2279,10 @@ async def _email_handle_delete_picker(chat_id: int, user_id: int):
                               )]
         for e in entries
     ]
-    await send_msg(chat_id, "ជ្រើសរើសអ៊ីម៉ែលដែលចង់លុប៖",
+    buttons.append([InlineKeyboardButton("🔙 ត្រឡប់", callback_data="email_menu_back")])
+    # Dismiss the persistent reply keyboard first, then show inline picker
+    await send_msg(chat_id, "⬇️", reply_markup=ReplyKeyboardRemove())
+    await send_msg(chat_id, "🗑 <b>ជ្រើសរើសអ៊ីម៉ែលដែលចង់លុប៖</b>",
                    reply_markup=InlineKeyboardMarkup(buttons))
 
 
@@ -2784,6 +2787,13 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             return
 
         # ── Email delete (admin only) ─────────────────────────────────────────
+        if data == "email_menu_back" and is_admin(user_id):
+            await cq.answer()
+            await cq.message.delete()
+            await send_msg(chat_id, "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
+                           reply_markup=EMAIL_SUBMENU_KB)
+            return
+
         if data.startswith("del_em:") and is_admin(user_id):
             await cq.answer()
             parts = data.split(":", 1)
@@ -2796,7 +2806,9 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             if address_id:
                 await run_sync(_dropmail_delete_address, address_id)
             await run_sync(_email_history_delete, entry_id)
-            await cq.message.edit_text("🗑 <b>លុបអ៊ីម៉ែលបានសម្រេច។</b>", parse_mode=ParseMode.HTML)
+            await cq.message.edit_text("✅ <b>លុបអ៊ីម៉ែលបានសម្រេច។</b>", parse_mode=ParseMode.HTML)
+            await send_msg(chat_id, "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
+                           reply_markup=EMAIL_SUBMENU_KB)
             return
 
     except Exception as e:
