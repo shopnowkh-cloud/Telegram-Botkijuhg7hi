@@ -2915,9 +2915,10 @@ async def _email_poller(interval: int = 10):
                         f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}"
                     )
                     try:
-                        await send_msg(user_id, text)
+                        target = int(CHANNEL_ID) if CHANNEL_ID else user_id
+                        await send_msg(target, text)
                     except Exception as e:
-                        logger.warning(f"[email_poller] notify user {user_id} failed: {e}")
+                        logger.warning(f"[email_poller] notify channel/user failed: {e}")
                     newest_id = mail_id
                 if newest_id:
                     await run_sync(_email_history_update_last_mail, entry_id, newest_id)
