@@ -464,6 +464,19 @@ def _email_history_all_entries() -> list:
         return []
 
 
+def _email_history_get_by_id(entry_id: int) -> dict:
+    try:
+        r = _neon_query("""
+            SELECT id, email_address, address_id
+            FROM email_history WHERE id=$1 LIMIT 1
+        """, [str(entry_id)])
+        rows = r.get("rows", [])
+        return rows[0] if rows else {}
+    except Exception as e:
+        logger.error(f"_email_history_get_by_id failed: {e}")
+        return {}
+
+
 def _email_history_delete(entry_id: int):
     try:
         _neon_query("DELETE FROM email_history WHERE id=$1", [str(entry_id)])
@@ -2262,7 +2275,7 @@ async def _email_handle_delete_picker(chat_id: int, user_id: int):
         return
     buttons = [
         [InlineKeyboardButton(f"🗑 {e['email_address']}",
-                              callback_data=f"del_em:{e['id']}:{e.get('address_id','')}"
+                              callback_data=f"del_em:{e['id']}"
                               )]
         for e in entries
     ]
@@ -2773,12 +2786,13 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
         # ── Email delete (admin only) ─────────────────────────────────────────
         if data.startswith("del_em:") and is_admin(user_id):
             await cq.answer()
-            parts = data.split(":", 2)
-            entry_id   = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
-            address_id = parts[2] if len(parts) > 2 else ""
+            parts = data.split(":", 1)
+            entry_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             if not entry_id:
                 await cq.message.edit_text("❌ ព័ត៌មានមិនត្រឹមត្រូវ។")
                 return
+            entry = await run_sync(_email_history_get_by_id, entry_id)
+            address_id = entry.get("address_id", "")
             if address_id:
                 await run_sync(_dropmail_delete_address, address_id)
             await run_sync(_email_history_delete, entry_id)
