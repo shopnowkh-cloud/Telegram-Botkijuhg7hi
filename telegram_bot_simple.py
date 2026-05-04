@@ -2271,7 +2271,6 @@ async def _email_handle_new(chat_id: int, user_id: int):
     if not DROPMAIL_API_TOKEN:
         await send_msg(chat_id, "❌ DROPMAIL_API_TOKEN មិនទាន់កំណត់។", reply_markup=EMAIL_SUBMENU_KB)
         return
-    await send_msg(chat_id, "⏳ កំពុងបង្កើតអ៊ីម៉ែលថ្មី…", reply_markup=EMAIL_SUBMENU_KB)
     try:
         result = await run_sync(_dropmail_create_session)
     except Exception as e:
