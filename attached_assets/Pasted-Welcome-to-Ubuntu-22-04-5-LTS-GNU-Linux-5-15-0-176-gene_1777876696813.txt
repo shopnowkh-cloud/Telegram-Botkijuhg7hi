@@ -1,0 +1,45 @@
+Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-176-generic x86_64)
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+ System information as of Mon May  4 01:35:08 PM +07 2026
+  System load:  0.13               Processes:               159
+  Usage of /:   68.6% of 16.88GB   Users logged in:         0
+  Memory usage: 37%                IPv4 address for enp1s0: 10.1.28.32
+  Swap usage:   3%
+  => There is 1 zombie process.
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how
+MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+Expanded Security Maintenance for Applications is not enabled.
+0 updates can be applied immediately.
+2 additional security updates can be applied with ESM Apps.
+Learn more about enabling ESM Apps service at https://ubuntu.com/esm
+New release '24.04.4 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+*** System restart required ***
+Last login: Mon May  4 12:52:28 2026 from 36.37.142.88
+ubuntu@ubuntu:~$ ls ~/Telegram-Botkijuhg7hi/
+attached_assets              render.yaml              uv.lock
+bot_session.session          replit.md                venv
+bot_session.session-journal  requirements.txt         venvsource
+Dockerfile                   telegram_bot_simple.py
+pyproject.toml               telegram_bot_simple.pyx
+ubuntu@ubuntu:~$ cd ~/Telegram-Botkijuhg7hi
+git pull origin master
+remote: Enumerating objects: 52, done.
+remote: Counting objects: 100% (52/52), done.
+remote: Compressing objects: 100% (9/9), done.
+remote: Total 47 (delta 38), reused 47 (delta 38), pack-reused 0 (from 0)
+Unpacking objects: 100% (47/47), 10.51 KiB | 168.00 KiB/s, done.
+From https://github.com/shopnowkh-cloud/Telegram-Botkijuhg7hi
+ * branch            master     -> FETCH_HEAD
+   6f52a88..7cfb1e6  master     -> origin/master
+Updating 6f52a88..7cfb1e6
+error: Your local changes to the following files would be overwritten by merge:
+        bot_session.session
+        bot_session.session-journal
+Please commit your changes or stash them before you merge.
+Aborting
+ubuntu@ubuntu:~/Telegram-Botkijuhg7hi$
