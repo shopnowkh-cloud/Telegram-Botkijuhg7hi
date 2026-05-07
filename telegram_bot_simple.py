@@ -1111,6 +1111,25 @@ def _get_client():
     return _current_client.get() or app
 
 
+def _botapi_send_copy_button(chat_id, text, code: str) -> None:
+    """Blocking: send a message with a native copy_text button via Bot API HTTP."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": {
+            "inline_keyboard": [[
+                {"text": "📋 Copy Code", "copy_text": {"text": code}}
+            ]]
+        },
+    }
+    try:
+        http.post(url, json=payload, timeout=10)
+    except Exception as e:
+        logger.warning(f"[botapi_send_copy_button] failed: {e}")
+
+
 async def send_msg(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=None,
                    reply_to_message_id=None, message_effect_id=None):
     client = _get_client()
@@ -3393,9 +3412,11 @@ async def _email_poller(interval: int = 10):
                             f"<code>{html.escape(to_addr)}</code>\n\n"
                             f"<code>{otp_code}</code>"
                         )
-                        otp_kb = InlineKeyboardMarkup([[
-                            InlineKeyboardButton(f"📩 លេខកូដ: {otp_code}", callback_data=f"copy_otp:{otp_code}")
-                        ]])
+                        try:
+                            target = int(CHANNEL_ID) if CHANNEL_ID else user_id
+                            await run_sync(_botapi_send_copy_button, target, text, otp_code)
+                        except Exception as e:
+                            logger.warning(f"[email_poller] otp notify failed: {e}")
                     else:
                         preview = body[:800] + "\n…" if len(body) > 800 else body
                         text = (
@@ -3403,12 +3424,11 @@ async def _email_poller(interval: int = 10):
                             f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
                             f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
                         )
-                        otp_kb = None
-                    try:
-                        target = int(CHANNEL_ID) if CHANNEL_ID else user_id
-                        await send_msg(target, text, reply_markup=otp_kb)
-                    except Exception as e:
-                        logger.warning(f"[email_poller] notify channel/user failed: {e}")
+                        try:
+                            target = int(CHANNEL_ID) if CHANNEL_ID else user_id
+                            await send_msg(target, text)
+                        except Exception as e:
+                            logger.warning(f"[email_poller] notify failed: {e}")
                     newest_id = mail_id
                 if newest_id:
                     await run_sync(_email_history_update_last_mail, entry_id, newest_id)
