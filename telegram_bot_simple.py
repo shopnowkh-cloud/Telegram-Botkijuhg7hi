@@ -13,6 +13,7 @@ except ImportError:
     pass
 
 import asyncio
+import contextvars
 import hashlib
 import html
 import io
@@ -151,6 +152,13 @@ app = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
 )
+
+# Context var so send helpers use the right client (main bot vs clone bot)
+_current_client: contextvars.ContextVar = contextvars.ContextVar("_current_client", default=None)
+
+# Clone-bot globals
+ADMIN_BOT_TOKEN: str = ""
+admin_clone_app = None
 
 # ── 8. Database layer (Neon HTTP API — synchronous, called via run_sync) ──────
 NEON_DATABASE_URL = os.environ.get("NEON_DATABASE_URL", "")
@@ -986,6 +994,11 @@ BTN_EMAIL_DELETE      = "🗑️ លុបអ៊ីម៉ែល"
 BTN_EMAIL_TOKEN_EDIT  = "✏️ ប្តូរ Dropmail Token"
 BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 
+BTN_CLONE_BOT         = "🤖 Clone Bot Admin"
+BTN_CLONE_BOT_SET     = "✏️ កំណត់ Bot Token"
+BTN_CLONE_BOT_STOP    = "⛔ បិទ Clone Bot"
+BTN_CLONE_BOT_START   = "▶️ បើក Clone Bot"
+
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
@@ -994,6 +1007,7 @@ ADMIN_BUTTON_LABELS = {
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
     BTN_EMAIL_TOKEN_EDIT, BTN_EMAIL_TOKEN_INFO,
+    BTN_CLONE_BOT, BTN_CLONE_BOT_SET, BTN_CLONE_BOT_STOP, BTN_CLONE_BOT_START,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -1011,6 +1025,7 @@ ADMIN_SETTINGS_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_PAYMENT),      KeyboardButton(BTN_BAKONG)],
     [KeyboardButton(BTN_CHANNEL),      KeyboardButton(BTN_ADMINS)],
     [KeyboardButton(BTN_MAINTENANCE),  KeyboardButton(BTN_BROADCAST)],
+    [KeyboardButton(BTN_CLONE_BOT)],
 ], resize_keyboard=True, is_persistent=True)
 
 CANCEL_INPUT_KB = ReplyKeyboardMarkup(
@@ -1059,6 +1074,12 @@ EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
+CLONE_BOT_SUBMENU_KB = ReplyKeyboardMarkup([
+    [KeyboardButton(BTN_CLONE_BOT_SET)],
+    [KeyboardButton(BTN_CLONE_BOT_STOP), KeyboardButton(BTN_CLONE_BOT_START)],
+    [KeyboardButton(BTN_BACK_SETTINGS)],
+], resize_keyboard=True, is_persistent=True)
+
 CHECK_PAYMENT_INLINE = InlineKeyboardMarkup([
     [InlineKeyboardButton("🚫 បោះបង់", callback_data="cancel_purchase")]
 ])
@@ -1085,8 +1106,14 @@ def _short_label(text, limit=36):
 
 
 # ── 12. Async send helpers ────────────────────────────────────────────────────
+def _get_client():
+    """Return the active Pyrogram client for the current coroutine (main or clone)."""
+    return _current_client.get() or app
+
+
 async def send_msg(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=None,
                    reply_to_message_id=None, message_effect_id=None):
+    client = _get_client()
     try:
         kwargs = dict(chat_id=chat_id, text=text, parse_mode=parse_mode)
         if reply_markup is not None:
@@ -1096,10 +1123,10 @@ async def send_msg(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=None,
         if message_effect_id:
             kwargs["message_effect_id"] = message_effect_id
         try:
-            return await app.send_message(**kwargs)
+            return await client.send_message(**kwargs)
         except TypeError:
             kwargs.pop("message_effect_id", None)
-            return await app.send_message(**kwargs)
+            return await client.send_message(**kwargs)
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return await send_msg(chat_id, text, parse_mode, reply_markup, reply_to_message_id, message_effect_id)
@@ -1114,7 +1141,7 @@ async def delete_msg(chat_id, message_id):
     if not message_id:
         return
     try:
-        await app.delete_messages(chat_id, message_id)
+        await _get_client().delete_messages(chat_id, message_id)
     except (MessageDeleteForbidden, RPCError):
         pass
     except Exception as e:
@@ -1135,6 +1162,7 @@ async def delete_msg_later(chat_id, message_id, delay_seconds=120):
 
 
 async def send_photo(chat_id, img_bytes, caption=None, parse_mode=ParseMode.HTML, reply_markup=None):
+    client = _get_client()
     try:
         buf = io.BytesIO(img_bytes)
         buf.name = "qr.png"
@@ -1144,7 +1172,7 @@ async def send_photo(chat_id, img_bytes, caption=None, parse_mode=ParseMode.HTML
             kwargs["parse_mode"] = parse_mode
         if reply_markup is not None:
             kwargs["reply_markup"] = reply_markup
-        return await app.send_photo(**kwargs)
+        return await client.send_photo(**kwargs)
     except FloodWait as e:
         await asyncio.sleep(e.value)
         return await send_photo(chat_id, img_bytes, caption, parse_mode, reply_markup)
@@ -1157,7 +1185,7 @@ async def send_document(chat_id, data_bytes, filename, caption=None):
     try:
         buf = io.BytesIO(data_bytes)
         buf.name = filename
-        return await app.send_document(chat_id, document=buf, caption=caption)
+        return await _get_client().send_document(chat_id, document=buf, caption=caption)
     except Exception as e:
         logger.error(f"send_document({chat_id}) error: {e}")
     return None
@@ -1165,7 +1193,7 @@ async def send_document(chat_id, data_bytes, filename, caption=None):
 
 async def copy_msg(to_chat_id, from_chat_id, message_id):
     try:
-        return await app.copy_message(to_chat_id, from_chat_id, message_id)
+        return await _get_client().copy_message(to_chat_id, from_chat_id, message_id)
     except Exception as e:
         logger.error(f"copy_msg error: {e}")
     return None
@@ -1173,7 +1201,7 @@ async def copy_msg(to_chat_id, from_chat_id, message_id):
 
 async def forward_msg(to_chat_id, from_chat_id, message_id):
     try:
-        return await app.forward_messages(to_chat_id, from_chat_id, message_id)
+        return await _get_client().forward_messages(to_chat_id, from_chat_id, message_id)
     except Exception as e:
         logger.error(f"forward_msg error: {e}")
     return None
@@ -1184,7 +1212,7 @@ async def edit_caption(chat_id, message_id, caption, parse_mode=ParseMode.HTML, 
         kwargs = dict(chat_id=chat_id, message_id=message_id, caption=caption, parse_mode=parse_mode)
         if reply_markup:
             kwargs["reply_markup"] = reply_markup
-        return await app.edit_message_caption(**kwargs)
+        return await _get_client().edit_message_caption(**kwargs)
     except MessageNotModified:
         pass
     except Exception as e:
@@ -1745,6 +1773,404 @@ async def _show_maintenance_inline(chat_id):
                    reply_markup=MAINTENANCE_SUBMENU_KB)
 
 
+async def _show_clone_bot_inline(chat_id):
+    global admin_clone_app
+    token_display = f"<code>{html.escape(ADMIN_BOT_TOKEN[:10])}…</code>" if ADMIN_BOT_TOKEN else "(មិនទាន់កំណត់)"
+    running = admin_clone_app is not None and admin_clone_app.is_connected
+    status = "🟢 កំពុងដំណើរការ" if running else "🔴 បិទ"
+    await send_msg(
+        chat_id,
+        f"🤖 <b>Clone Bot Admin</b>\n\n"
+        f"Bot Token: {token_display}\n"
+        f"ស្ថានភាព: {status}\n\n"
+        f"<i>Clone Bot នេះសម្រាប់ admin គ្រប់គ្រងតែប៉ុណ្ណោះ — គ្មាន user ទិញ។</i>",
+        reply_markup=CLONE_BOT_SUBMENU_KB)
+
+
+async def _start_admin_clone_bot(token: str) -> str:
+    """Start the admin-only clone bot. Returns status message."""
+    global admin_clone_app, ADMIN_BOT_TOKEN
+    from pyrogram.handlers import MessageHandler as _MH
+
+    if admin_clone_app is not None:
+        try:
+            await admin_clone_app.stop()
+        except Exception:
+            pass
+        admin_clone_app = None
+
+    try:
+        clone = Client(
+            name="admin_clone_session",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            bot_token=token,
+        )
+
+        async def _clone_guard(client, message):
+            uid = message.from_user.id if message.from_user else None
+            if not is_admin(uid):
+                try:
+                    await client.send_message(
+                        message.chat.id,
+                        "⛔ Bot នេះសម្រាប់ admin ប៉ុណ្ណោះ។")
+                except Exception:
+                    pass
+                message.stop_propagation()
+                return
+
+            chat_id    = message.chat.id
+            message_id = message.id
+            text       = (message.text or "").strip()
+
+            tok = _current_client.set(client)
+            try:
+                async with get_user_lock(uid):
+                    async with _data_lock:
+                        sess = user_sessions.get(uid, {})
+                    state = str(sess.get("state", ""))
+
+                    if text.startswith("/start"):
+                        async with _data_lock:
+                            user_sessions.pop(uid, None)
+                        asyncio.create_task(run_sync(_save_sessions))
+                        await send_admin_settings_menu(chat_id)
+                        message.stop_propagation()
+                        return
+
+                    if text.startswith("/cancel"):
+                        async with _data_lock:
+                            user_sessions.pop(uid, None)
+                        asyncio.create_task(run_sync(_save_sessions))
+                        await send_admin_settings_menu(chat_id)
+                        message.stop_propagation()
+                        return
+
+                    if text == ADMIN_SETTINGS_BTN:
+                        if state.startswith("admin_input:"):
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                        await send_admin_settings_menu(chat_id)
+                        message.stop_propagation()
+                        return
+
+                    if state.startswith("admin_input:"):
+                        key = state.split(":", 1)[1]
+                        if await _handle_admin_settings_input(chat_id, uid, message_id, key, text):
+                            message.stop_propagation()
+                            return
+
+                    if state == "delete_type_select":
+                        labels = sess.get("labels", {}) or {}
+                        if text == BTN_BACK_SETTINGS:
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_admin_settings_menu(chat_id)
+                            message.stop_propagation()
+                            return
+                        type_name = labels.get(text)
+                        if type_name and type_name in accounts_data.get("account_types", {}):
+                            async with _data_lock:
+                                count = len(accounts_data["account_types"].get(type_name, []))
+                                price = accounts_data.get("prices", {}).get(type_name, 0)
+                                user_sessions[uid] = {"state": "delete_type_confirm", "type_name": type_name}
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_msg(
+                                chat_id,
+                                f"⚠️ <b>តើអ្នកពិតជាចង់លុបប្រភេទ គូប៉ុង នេះមែនទេ?</b>\n\n"
+                                f"<blockquote>🔹 ប្រភេទ: {html.escape(type_name)}\n"
+                                f"🔹 ចំនួន: {count}\n🔹 តម្លៃ: ${price}</blockquote>",
+                                reply_markup=ReplyKeyboardMarkup([
+                                    [KeyboardButton(BTN_DELETE_CONFIRM)],
+                                    [KeyboardButton(BTN_DELETE_CANCEL)],
+                                ], resize_keyboard=True, is_persistent=True))
+                            message.stop_propagation()
+                            return
+
+                    if state == "delete_type_confirm":
+                        type_name = sess.get("type_name")
+                        if text == BTN_DELETE_CONFIRM:
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            if not type_name or type_name not in accounts_data.get("account_types", {}):
+                                await send_msg(chat_id, "⚠️ <b>ប្រភេទនេះមិនមានទៀតហើយ!</b>",
+                                               reply_markup=ADMIN_SETTINGS_KB)
+                                message.stop_propagation()
+                                return
+                            async with _data_lock:
+                                count = len(accounts_data["account_types"].pop(type_name, []))
+                                accounts_data.get("prices", {}).pop(type_name, None)
+                                accounts_data["accounts"] = [
+                                    a for a in accounts_data.get("accounts", []) if a.get("type") != type_name]
+                            asyncio.create_task(run_sync(_save_data))
+                            await send_msg(chat_id,
+                                           f"✅ <b>បានលុបប្រភេទ <code>{html.escape(type_name)}</code> ចំនួន {count} records!</b>",
+                                           reply_markup=ADMIN_SETTINGS_KB)
+                            message.stop_propagation()
+                            return
+                        elif text == BTN_DELETE_CANCEL:
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_msg(chat_id, "🚫 <b>បានបោះបង់ការលុប</b>", reply_markup=ADMIN_SETTINGS_KB)
+                            message.stop_propagation()
+                            return
+
+                    if state == "broadcast_confirm":
+                        if text == BTN_BROADCAST_CONFIRM:
+                            bcast_msg_id  = sess.get("broadcast_message_id")
+                            bcast_chat_id = sess.get("broadcast_chat_id") or chat_id
+                            use_copy      = bool(sess.get("broadcast_use_copy"))
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            if bcast_msg_id:
+                                await send_msg(chat_id, "📢 កំពុង​ផ្សាយ​សារ ... សូមរង់ចាំ",
+                                               reply_markup=ADMIN_SETTINGS_KB)
+                                asyncio.create_task(_run_broadcast(bcast_chat_id, bcast_msg_id, use_copy))
+                            else:
+                                await send_msg(chat_id, "⚠️ មិន​ឃើញ​សារ​ដែល​ចង់​ផ្សាយ​ទេ",
+                                               reply_markup=ADMIN_SETTINGS_KB)
+                            message.stop_propagation()
+                            return
+                        elif text == BTN_BROADCAST_CANCEL:
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_msg(chat_id, "🚫 <b>បាន​បោះបង់​ការ​ផ្សាយ</b>", reply_markup=ADMIN_SETTINGS_KB)
+                            message.stop_propagation()
+                            return
+
+                    if state == "email_delete_picker":
+                        if text == BTN_BACK_SETTINGS:
+                            async with _data_lock:
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_admin_settings_menu(chat_id)
+                            message.stop_propagation()
+                            return
+                        entries = await run_sync(_email_history_entries, uid)
+                        emails = {e['email_address'] for e in entries}
+                        if text in emails:
+                            await _email_handle_delete_confirm(chat_id, uid, text)
+                            message.stop_propagation()
+                            return
+
+                    if state == "waiting_for_accounts":
+                        email_pat = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+                        accs = []
+                        for line in text.strip().split("\n"):
+                            em = line.strip()
+                            if em and email_pat.match(em):
+                                accs.append({"email": em})
+                        if accs:
+                            async with _data_lock:
+                                sess["accounts"] = accs
+                                sess["state"] = "waiting_for_account_type"
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_msg(chat_id,
+                                           f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(accs)}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*",
+                                           parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                        else:
+                            await send_msg(chat_id,
+                                           "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ!*",
+                                           parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                        message.stop_propagation()
+                        return
+
+                    if state == "waiting_for_account_type":
+                        async with _data_lock:
+                            sess["account_type"] = text
+                            sess["state"] = "waiting_for_price"
+                        asyncio.create_task(run_sync(_save_sessions))
+                        await send_msg(chat_id,
+                                       f"*សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {text}*",
+                                       parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                        message.stop_propagation()
+                        return
+
+                    if state == "waiting_for_price":
+                        try:
+                            price = float(text.strip().replace("$", ""))
+                            account_type = sess.get("account_type", "")
+                            accs_to_add  = sess.get("accounts", [])
+                            async with _data_lock:
+                                accounts_data["accounts"].extend(accs_to_add)
+                                if account_type in accounts_data["account_types"]:
+                                    accounts_data["account_types"][account_type].extend(accs_to_add)
+                                else:
+                                    accounts_data["account_types"][account_type] = list(accs_to_add)
+                                accounts_data["prices"][account_type] = price
+                                user_sessions.pop(uid, None)
+                            asyncio.create_task(run_sync(_save_data))
+                            asyncio.create_task(run_sync(_save_sessions))
+                            await send_msg(
+                                chat_id,
+                                f"*✅ បានបញ្ចូល គូប៉ុង ដោយជោគជ័យ*\n\n"
+                                f"```\n🔹 ចំនួន: {len(accs_to_add)}\n🔹 ប្រភេទ: {account_type}\n🔹 តម្លៃ: {price}$\n```",
+                                parse_mode=ParseMode.MARKDOWN)
+                        except ValueError:
+                            await send_msg(chat_id, "តម្លៃមិនត្រឹមត្រូវ។ សូមបញ្ចូលតម្លៃជាលេខ (ឧ: 5.99)")
+                        message.stop_propagation()
+                        return
+
+                    if text in ADMIN_BUTTON_LABELS:
+                        await _dispatch_admin_button(client, message, uid, chat_id, text)
+                        message.stop_propagation()
+                        return
+
+                    await send_admin_settings_menu(chat_id)
+                    message.stop_propagation()
+            finally:
+                _current_client.reset(tok)
+
+        clone.add_handler(_MH(_clone_guard, filters.private), group=0)
+        await clone.start()
+        admin_clone_app = clone
+        ADMIN_BOT_TOKEN = token
+        await run_sync(_set_setting, "ADMIN_BOT_TOKEN", token)
+        me = await clone.get_me()
+        logger.info(f"Admin clone bot started: @{me.username}")
+        return f"✅ <b>Clone Bot Admin ចាប់ផ្ដើមដំណើរការ!</b>\n\n🤖 @{me.username}"
+    except Exception as e:
+        admin_clone_app = None
+        logger.error(f"Failed to start clone bot: {e}")
+        return f"❌ <b>Clone Bot ចាប់ផ្ដើមមិនបាន:</b>\n<code>{html.escape(str(e))}</code>"
+
+
+async def _stop_admin_clone_bot() -> str:
+    """Stop the admin clone bot."""
+    global admin_clone_app, ADMIN_BOT_TOKEN
+    if admin_clone_app is None:
+        return "ℹ️ Clone Bot មិនទាន់ដំណើរការ។"
+    try:
+        await admin_clone_app.stop()
+    except Exception as e:
+        logger.warning(f"Clone bot stop error (ignored): {e}")
+    admin_clone_app = None
+    logger.info("Admin clone bot stopped.")
+    return "⛔ <b>Clone Bot Admin បានបិទ។</b>"
+
+
+async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
+    """Shared button dispatch used by both main and clone admin bots."""
+    global MAINTENANCE_MODE, CHANNEL_ID
+    tok = _current_client.set(client)
+    try:
+        if btn == BTN_BACK_SETTINGS:
+            async with _data_lock:
+                user_sessions.pop(user_id, None)
+            asyncio.create_task(run_sync(_save_sessions))
+            await send_admin_settings_menu(chat_id)
+        elif btn == BTN_ADD_ACCOUNT:
+            async with _data_lock:
+                user_sessions[user_id] = {"state": "waiting_for_accounts"}
+            asyncio.create_task(run_sync(_save_sessions))
+            await send_msg(
+                chat_id,
+                "*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
+                "```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```",
+                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+        elif btn == BTN_DELETE_TYPE:
+            await _show_delete_type_menu_inline(chat_id, user_id)
+        elif btn == BTN_STOCK:
+            await _export_stock_inline(chat_id)
+        elif btn == BTN_USERS:
+            await _show_users_list_inline(chat_id)
+        elif btn == BTN_BUYERS:
+            await _export_buyers_report_inline(chat_id)
+        elif btn == BTN_PAYMENT:
+            await _show_payment_inline(chat_id)
+        elif btn == BTN_BAKONG:
+            await _show_bakong_inline(chat_id)
+        elif btn == BTN_CHANNEL:
+            await _show_channel_inline(chat_id)
+        elif btn == BTN_ADMINS:
+            await _show_admins_inline(chat_id)
+        elif btn == BTN_MAINTENANCE:
+            await _show_maintenance_inline(chat_id)
+        elif btn == BTN_BROADCAST:
+            await _prompt_admin_input(
+                chat_id, user_id, "broadcast",
+                "📢 សូមផ្ញើ​សារ​ដែល​ចង់​ផ្សាយ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់៖")
+        elif btn == BTN_PAYMENT_EDIT:
+            await _prompt_admin_input(chat_id, user_id, "payment",
+                                      "💳 សូមផ្ញើ <b>ឈ្មោះ Payment</b> ថ្មី:")
+        elif btn == BTN_BAKONG_RELAY_EDIT:
+            await _prompt_admin_input(chat_id, user_id, "bakong_relay",
+                                      "🔵 សូមផ្ញើ <b>Relay Token</b> ថ្មី (ចាប់ផ្ដើមមាន <code>rbk...</code>):")
+        elif btn == BTN_BAKONG_API_EDIT:
+            await _prompt_admin_input(chat_id, user_id, "bakong_api",
+                                      "🟠 សូមផ្ញើ <b>Bakong API Token</b> ថ្មី (JWT):")
+        elif btn == BTN_CHANNEL_EDIT:
+            await _prompt_admin_input(chat_id, user_id, "channel",
+                                      "📢 សូមផ្ញើ <b>Channel ID</b> ថ្មី (ឧ. <code>-1001234567890</code>):")
+        elif btn == BTN_CHANNEL_CLEAR:
+            CHANNEL_ID = ""
+            await run_sync(_set_setting, "TELEGRAM_CHANNEL_ID", "")
+            await send_msg(chat_id, "✅ បានលុប Channel ID", reply_markup=ADMIN_SETTINGS_KB)
+        elif btn == BTN_ADMIN_ADD:
+            await _prompt_admin_input(chat_id, user_id, "admin_add",
+                                      "➕ សូមផ្ញើ <b>Telegram User ID</b> ដែលចង់បន្ថែម:")
+        elif btn == BTN_ADMIN_REMOVE:
+            await _prompt_admin_input(chat_id, user_id, "admin_remove",
+                                      "➖ សូមផ្ញើ <b>Telegram User ID</b> ដែលចង់ដក:")
+        elif btn == BTN_MAINT_ON:
+            MAINTENANCE_MODE = True
+            await run_sync(_set_setting, "MAINTENANCE_MODE", "true")
+            await send_msg(chat_id, "🔴 បានបិទ Bot", reply_markup=ADMIN_SETTINGS_KB)
+        elif btn == BTN_MAINT_OFF:
+            MAINTENANCE_MODE = False
+            await run_sync(_set_setting, "MAINTENANCE_MODE", "false")
+            await send_msg(chat_id, "🟢 បានបើក Bot", reply_markup=ADMIN_SETTINGS_KB)
+        elif btn == BTN_EMAIL_MGMT:
+            if not DROPMAIL_API_TOKEN:
+                await send_msg(chat_id,
+                    "⚠️ <b>DROPMAIL_API_TOKEN</b> មិនទាន់កំណត់។\n\n"
+                    "ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីកំណត់ token ។",
+                    reply_markup=EMAIL_SUBMENU_KB)
+            else:
+                await send_msg(chat_id,
+                    "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
+                    reply_markup=EMAIL_SUBMENU_KB)
+        elif btn == BTN_EMAIL_NEW:
+            await _email_handle_new(chat_id, user_id)
+        elif btn == BTN_EMAIL_LIST:
+            await _email_handle_list(chat_id, user_id)
+        elif btn == BTN_EMAIL_DELETE:
+            await _email_handle_delete_picker(chat_id, user_id)
+        elif btn == BTN_EMAIL_TOKEN_EDIT:
+            await _prompt_admin_input(
+                chat_id, user_id, "dropmail_token",
+                "🔑 សូមផ្ញើ <b>Dropmail API Token</b> ថ្មី:\n\n"
+                "<i>⚠️ Token នឹងត្រូវបានលុបចោលស្វ័យប្រវត្តិ — ផ្ញើដោយប្រុងប្រយ័ត្ន!</i>")
+        elif btn == BTN_EMAIL_TOKEN_INFO:
+            await _email_show_token_info(chat_id)
+        elif btn == BTN_CLONE_BOT:
+            await _show_clone_bot_inline(chat_id)
+        elif btn == BTN_CLONE_BOT_SET:
+            await _prompt_admin_input(
+                chat_id, user_id, "admin_bot_token",
+                "🤖 សូមផ្ញើ <b>Bot Token</b> របស់ Clone Bot Admin ថ្មី\n\n"
+                "<i>Token ត្រូវបន្ថែម Bot ថ្មី ដែលបានបង្កើតពី @BotFather</i>")
+        elif btn == BTN_CLONE_BOT_STOP:
+            msg = await _stop_admin_clone_bot()
+            await send_msg(chat_id, msg, reply_markup=CLONE_BOT_SUBMENU_KB)
+        elif btn == BTN_CLONE_BOT_START:
+            if not ADMIN_BOT_TOKEN:
+                await send_msg(chat_id,
+                    "⚠️ មិនទាន់មាន Bot Token។ សូមចុច <b>✏️ កំណត់ Bot Token</b> ជាមុនសិន។",
+                    reply_markup=CLONE_BOT_SUBMENU_KB)
+            else:
+                msg = await _start_admin_clone_bot(ADMIN_BOT_TOKEN)
+                await send_msg(chat_id, msg, reply_markup=CLONE_BOT_SUBMENU_KB)
+    finally:
+        _current_client.reset(tok)
+
+
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
     global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, _DROPMAIL_URL
     raw = (text or "").strip()
@@ -1891,6 +2317,19 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
             "❓ <b>តើ​អ្នក​ប្រាកដ​ជា​ចង់​ផ្សាយ​សារ​ខាង​លើ​នេះ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់​មែន​ទេ?</b>\n\n"
             "ចុច <b>✅ បញ្ជាក់ផ្សាយ</b> ឬ <b>🚫 បោះបង់ការផ្សាយ</b>",
             reply_markup=BROADCAST_CONFIRM_KB)
+        return True
+
+    if key == "admin_bot_token":
+        if not raw:
+            await send_msg(chat_id, "🤖 សូមផ្ញើ <b>Bot Token</b> របស់ Clone Bot Admin (ឬចុច 🚫 បោះបង់)")
+            return True
+        asyncio.create_task(delete_msg(chat_id, message_id))
+        async with _data_lock:
+            user_sessions.pop(user_id, None)
+        asyncio.create_task(run_sync(_save_sessions))
+        await send_msg(chat_id, "⏳ កំពុងភ្ជាប់ Clone Bot Admin…", reply_markup=ADMIN_SETTINGS_KB)
+        result_msg = await _start_admin_clone_bot(raw)
+        await send_msg(chat_id, result_msg, reply_markup=CLONE_BOT_SUBMENU_KB)
         return True
 
     return False
@@ -2407,101 +2846,11 @@ async def _email_handle_delete_picker(chat_id: int, user_id: int):
 # ─── group 4: Admin keyboard button labels ────────────────────────────────────
 @app.on_message(filters.private & admin_button_filter, group=4)
 async def on_admin_button(client, message):
-    global MAINTENANCE_MODE, CHANNEL_ID
     user_id = message.from_user.id
     chat_id = message.chat.id
     btn     = (message.text or "").strip()
-
     async with get_user_lock(user_id):
-        if btn == BTN_BACK_SETTINGS:
-            async with _data_lock:
-                user_sessions.pop(user_id, None)
-            asyncio.create_task(run_sync(_save_sessions))
-            await send_admin_settings_menu(chat_id)
-        elif btn == BTN_ADD_ACCOUNT:
-            async with _data_lock:
-                user_sessions[user_id] = {"state": "waiting_for_accounts"}
-            asyncio.create_task(run_sync(_save_sessions))
-            await send_msg(
-                chat_id,
-                "*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
-                "```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```",
-                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
-        elif btn == BTN_DELETE_TYPE:
-            await _show_delete_type_menu_inline(chat_id, user_id)
-        elif btn == BTN_STOCK:
-            await _export_stock_inline(chat_id)
-        elif btn == BTN_USERS:
-            await _show_users_list_inline(chat_id)
-        elif btn == BTN_BUYERS:
-            await _export_buyers_report_inline(chat_id)
-        elif btn == BTN_PAYMENT:
-            await _show_payment_inline(chat_id)
-        elif btn == BTN_BAKONG:
-            await _show_bakong_inline(chat_id)
-        elif btn == BTN_CHANNEL:
-            await _show_channel_inline(chat_id)
-        elif btn == BTN_ADMINS:
-            await _show_admins_inline(chat_id)
-        elif btn == BTN_MAINTENANCE:
-            await _show_maintenance_inline(chat_id)
-        elif btn == BTN_BROADCAST:
-            await _prompt_admin_input(
-                chat_id, user_id, "broadcast",
-                "📢 សូមផ្ញើ​សារ​ដែល​ចង់​ផ្សាយ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់៖")
-        elif btn == BTN_PAYMENT_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "payment",
-                                      "💳 សូមផ្ញើ <b>ឈ្មោះ Payment</b> ថ្មី:")
-        elif btn == BTN_BAKONG_RELAY_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "bakong_relay",
-                                      "🔵 សូមផ្ញើ <b>Relay Token</b> ថ្មី (ចាប់ផ្ដើមមាន <code>rbk...</code>):")
-        elif btn == BTN_BAKONG_API_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "bakong_api",
-                                      "🟠 សូមផ្ញើ <b>Bakong API Token</b> ថ្មី (JWT):")
-        elif btn == BTN_CHANNEL_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "channel",
-                                      "📢 សូមផ្ញើ <b>Channel ID</b> ថ្មី (ឧ. <code>-1001234567890</code>):")
-        elif btn == BTN_CHANNEL_CLEAR:
-            CHANNEL_ID = ""
-            await run_sync(_set_setting, "TELEGRAM_CHANNEL_ID", "")
-            await send_msg(chat_id, "✅ បានលុប Channel ID", reply_markup=ADMIN_SETTINGS_KB)
-        elif btn == BTN_ADMIN_ADD:
-            await _prompt_admin_input(chat_id, user_id, "admin_add",
-                                      "➕ សូមផ្ញើ <b>Telegram User ID</b> ដែលចង់បន្ថែម:")
-        elif btn == BTN_ADMIN_REMOVE:
-            await _prompt_admin_input(chat_id, user_id, "admin_remove",
-                                      "➖ សូមផ្ញើ <b>Telegram User ID</b> ដែលចង់ដក:")
-        elif btn == BTN_MAINT_ON:
-            MAINTENANCE_MODE = True
-            await run_sync(_set_setting, "MAINTENANCE_MODE", "true")
-            await send_msg(chat_id, "🔴 បានបិទ Bot", reply_markup=ADMIN_SETTINGS_KB)
-        elif btn == BTN_MAINT_OFF:
-            MAINTENANCE_MODE = False
-            await run_sync(_set_setting, "MAINTENANCE_MODE", "false")
-            await send_msg(chat_id, "🟢 បានបើក Bot", reply_markup=ADMIN_SETTINGS_KB)
-        elif btn == BTN_EMAIL_MGMT:
-            if not DROPMAIL_API_TOKEN:
-                await send_msg(chat_id,
-                    "⚠️ <b>DROPMAIL_API_TOKEN</b> មិនទាន់កំណត់។\n\n"
-                    "ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីកំណត់ token ។",
-                    reply_markup=EMAIL_SUBMENU_KB)
-            else:
-                await send_msg(chat_id,
-                    "📧 <b>ការគ្រប់គ្រងអ៊ីម៉ែល</b>\n\nជ្រើសរើសប្រតិបត្តិការ៖",
-                    reply_markup=EMAIL_SUBMENU_KB)
-        elif btn == BTN_EMAIL_NEW:
-            await _email_handle_new(chat_id, user_id)
-        elif btn == BTN_EMAIL_LIST:
-            await _email_handle_list(chat_id, user_id)
-        elif btn == BTN_EMAIL_DELETE:
-            await _email_handle_delete_picker(chat_id, user_id)
-        elif btn == BTN_EMAIL_TOKEN_EDIT:
-            await _prompt_admin_input(
-                chat_id, user_id, "dropmail_token",
-                "🔑 សូមផ្ញើ <b>Dropmail API Token</b> ថ្មី:\n\n"
-                "<i>⚠️ Token នឹងត្រូវបានលុបចោលស្វ័យប្រវត្តិ — ផ្ញើដោយប្រុងប្រយ័ត្ន!</i>")
-        elif btn == BTN_EMAIL_TOKEN_INFO:
-            await _email_show_token_info(chat_id)
+        await _dispatch_admin_button(client, message, user_id, chat_id, btn)
     message.stop_propagation()
 
 
@@ -3150,6 +3499,15 @@ async def _on_startup():
     asyncio.create_task(_email_poller(10))
     logger.info("Email poller started (every 10s)")
 
+    _sv = await run_sync(_get_setting, "ADMIN_BOT_TOKEN")
+    if _sv:
+        logger.info("ADMIN_BOT_TOKEN found in DB — auto-starting clone bot…")
+        try:
+            result = await _start_admin_clone_bot(_sv)
+            logger.info(f"Clone bot auto-start: {result}")
+        except Exception as _e:
+            logger.error(f"Clone bot auto-start failed: {_e}")
+
     me = await app.get_me()
     logger.info(f"Bot connected: @{me.username}")
 
@@ -3167,6 +3525,12 @@ async def _run():
         await _on_startup()
         await idle()
     finally:
+        if admin_clone_app is not None:
+            try:
+                await admin_clone_app.stop()
+                logger.info("Admin clone bot stopped on shutdown.")
+            except Exception as _e:
+                logger.warning(f"Clone bot stop on shutdown: {_e}")
         await app.stop()
 
 
