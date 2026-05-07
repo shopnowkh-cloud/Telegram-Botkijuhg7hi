@@ -51,6 +51,45 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
+# ── 2b. Environment Validation ────────────────────────────────────────────────
+_REQUIRED_ENV_VARS = {
+    "TELEGRAM_BOT_TOKEN": "Bot token from @BotFather on Telegram",
+    "TELEGRAM_API_ID":    "API ID from https://my.telegram.org",
+    "TELEGRAM_API_HASH":  "API Hash from https://my.telegram.org",
+    "BAKONG_TOKEN":       "Bakong KHQR API token",
+    "NEON_DATABASE_URL":  "Neon Postgres connection string (postgresql://...)",
+    "DROPMAIL_API_TOKEN": "Dropmail API token from https://dropmail.me",
+}
+
+def _validate_env() -> None:
+    missing = []
+    for key, description in _REQUIRED_ENV_VARS.items():
+        val = os.environ.get(key, "").strip()
+        if not val:
+            missing.append((key, description))
+
+    if missing:
+        logger.error("=" * 60)
+        logger.error("STARTUP FAILED — Missing required environment variables:")
+        logger.error("=" * 60)
+        for key, description in missing:
+            logger.error(f"  ❌  {key}")
+            logger.error(f"       └─ {description}")
+        logger.error("=" * 60)
+        logger.error("Set these variables in your environment (e.g. .env file")
+        logger.error("or VPS environment) and restart the bot.")
+        logger.error("=" * 60)
+        sys.exit(1)
+
+    api_id_raw = os.environ.get("TELEGRAM_API_ID", "").strip()
+    if not api_id_raw.isdigit():
+        logger.error("STARTUP FAILED — TELEGRAM_API_ID must be a numeric value.")
+        sys.exit(1)
+
+    logger.info("All required environment variables are present. ✓")
+
+_validate_env()
+
 # ── 3. Config ────────────────────────────────────────────────────────────────
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 API_ID    = int(os.environ.get("TELEGRAM_API_ID", "0"))
