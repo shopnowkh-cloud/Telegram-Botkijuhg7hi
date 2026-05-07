@@ -3224,6 +3224,12 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
                     show_alert=True)
             return
 
+        # ── Copy OTP code ─────────────────────────────────────────────────────
+        if data.startswith("copy_otp:"):
+            code = data.split(":", 1)[1]
+            await cq.answer(code, show_alert=True)
+            return
+
         # ── Cancel purchase ───────────────────────────────────────────────────
         if data == "cancel_purchase":
             async with _data_lock:
@@ -3385,9 +3391,14 @@ async def _email_poller(interval: int = 10):
                         f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
                         f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
                     )
+                    otp_match = re.search(r'\b([0-9]{4,8})\b', body)
+                    otp_code  = otp_match.group(1) if otp_match else None
+                    otp_kb = InlineKeyboardMarkup([[
+                        InlineKeyboardButton(f"📩 លេខកូដ: {otp_code}", callback_data=f"copy_otp:{otp_code}")
+                    ]]) if otp_code else None
                     try:
                         target = int(CHANNEL_ID) if CHANNEL_ID else user_id
-                        await send_msg(target, text)
+                        await send_msg(target, text, reply_markup=otp_kb)
                     except Exception as e:
                         logger.warning(f"[email_poller] notify channel/user failed: {e}")
                     newest_id = mail_id
