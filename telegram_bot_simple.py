@@ -3385,17 +3385,25 @@ async def _email_poller(interval: int = 10):
                     from_addr = mail.get("fromAddr") or "unknown"
                     to_addr   = mail.get("toAddr") or email_addr
                     body      = (mail.get("text") or "").strip()
-                    preview   = body[:800] + "\n…" if len(body) > 800 else body
-                    text = (
-                        f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
-                        f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
-                        f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
-                    )
                     otp_match = re.search(r'\b([0-9]{4,8})\b', body)
                     otp_code  = otp_match.group(1) if otp_match else None
-                    otp_kb = InlineKeyboardMarkup([[
-                        InlineKeyboardButton(f"📩 លេខកូដ: {otp_code}", callback_data=f"copy_otp:{otp_code}")
-                    ]]) if otp_code else None
+                    if otp_code:
+                        text = (
+                            f"📩 <b>{html.escape(subject)}</b>\n\n"
+                            f"<code>{html.escape(to_addr)}</code>\n\n"
+                            f"<code>{otp_code}</code>"
+                        )
+                        otp_kb = InlineKeyboardMarkup([[
+                            InlineKeyboardButton(f"📩 លេខកូដ: {otp_code}", callback_data=f"copy_otp:{otp_code}")
+                        ]])
+                    else:
+                        preview = body[:800] + "\n…" if len(body) > 800 else body
+                        text = (
+                            f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
+                            f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
+                            f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
+                        )
+                        otp_kb = None
                     try:
                         target = int(CHANNEL_ID) if CHANNEL_ID else user_id
                         await send_msg(target, text, reply_markup=otp_kb)
