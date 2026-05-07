@@ -3385,16 +3385,9 @@ async def _email_poller(interval: int = 10):
                         f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
                         f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
                     )
-                    otp_match = re.search(r'\b([0-9]{4,8})\b', body)
-                    otp_code  = otp_match.group(1) if otp_match else None
                     try:
                         target = int(CHANNEL_ID) if CHANNEL_ID else user_id
                         await send_msg(target, text)
-                        if otp_code:
-                            await send_msg(
-                                target,
-                                f"🔑 <b>លេខកូដផ្ទៀងផ្ទាត់:</b>\n\n"
-                                f"<code>{otp_code}</code>")
                     except Exception as e:
                         logger.warning(f"[email_poller] notify channel/user failed: {e}")
                     newest_id = mail_id
