@@ -7,3 +7,12 @@ aiohttp>=3.9.0
 pyrogram>=2.0.0
 tgcrypto>=1.2.5
 python-dotenv>=1.0.0
+aiohttp
+bakong-khqr
+pillow
+pyrogram
+python-dotenv
+qrcode
+requests
+tgcrypto
+urllib3
