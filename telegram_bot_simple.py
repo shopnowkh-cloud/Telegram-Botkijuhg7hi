@@ -3382,11 +3382,8 @@ async def _email_poller(interval: int = 10):
                     preview   = body[:800] + "\n…" if len(body) > 800 else body
                     text = (
                         f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
-                        f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n"
-                        f"👤 ពី: <code>{html.escape(from_addr)}</code>\n"
-                        f"📝 ប្រធានបទ: <b>{html.escape(subject)}</b>\n\n"
-                        f"{'─' * 28}\n"
-                        f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}"
+                        f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
+                        f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
                     )
                     try:
                         target = int(CHANNEL_ID) if CHANNEL_ID else user_id
