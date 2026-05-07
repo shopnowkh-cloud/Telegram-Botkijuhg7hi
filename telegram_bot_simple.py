@@ -1536,22 +1536,15 @@ async def deliver_accounts(chat_id, user_id, session, payment_data=None, user_na
         f"<blockquote>🔹 ប្រភេទ: {account_type}\n🔹 ចំនួន: {quantity}</blockquote>\n\n"
         f"<b>គូប៉ុង របស់អ្នក៖</b>\n\n"
     )
-    copy_rows = []
     for acc in delivered:
         if "email" in acc:
-            val = acc['email']
-            msg += f"<code>{html.escape(val)}</code>\n"
+            msg += f"{acc['email']}\n"
         else:
-            val = f"{acc.get('phone','')} | {acc.get('password','')}".strip(" |")
-            msg += f"<code>{html.escape(val)}</code>\n"
-        cb = f"copy_otp:{val}"
-        copy_rows.append([InlineKeyboardButton(f"📋 {val}", callback_data=cb[:64])])
+            msg += f"{acc.get('phone','')} | {acc.get('password','')}\n"
     msg += f'\n<i>សូមអរគុណសម្រាប់ការទិញ <tg-emoji emoji-id="5897474556834091884">🙏</tg-emoji></i>'
-    copy_kb = InlineKeyboardMarkup(copy_rows) if copy_rows else None
 
     await send_msg(chat_id, msg, message_effect_id="5046509860389126442",
-                   reply_markup=copy_kb)
-    await send_msg(chat_id, "​", reply_markup=_main_kb(user_id))
+                   reply_markup=_main_kb(user_id))
 
     try:
         cambodia_tz = timezone(timedelta(hours=7))
