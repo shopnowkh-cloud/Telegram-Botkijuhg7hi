@@ -16,3 +16,12 @@ qrcode
 requests
 tgcrypto
 urllib3
+aiohttp
+bakong-khqr
+pillow
+pyrogram
+python-dotenv
+qrcode
+requests
+tgcrypto
+urllib3
