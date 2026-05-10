@@ -3145,7 +3145,8 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             await cq.answer()
             at = (_account_type_from_callback_id(data[13:]) if data.startswith("out_of_stock:")
                   else data.replace("out_of_stock_", "")) or "នេះ"
-            await send_msg(chat_id, f"សូមអភ័យទោស គូប៉ុង {at} អស់ពីស្តុក 🪤")
+            await send_msg(chat_id, f"_សូមអភ័យទោស គូប៉ុង {at} អស់ពីស្តុក 🪤_",
+                           parse_mode=ParseMode.MARKDOWN)
             return
 
         # ── Admin delete type: step 1 ─────────────────────────────────────────
