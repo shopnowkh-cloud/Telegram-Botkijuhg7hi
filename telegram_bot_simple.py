@@ -35,7 +35,7 @@ from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ForceReply,
 )
 from pyrogram.errors import (
     MessageDeleteForbidden, MessageNotModified, FloodWait,
@@ -1933,7 +1933,10 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
                 chat_id,
                 "*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
                 "```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```",
-                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=ForceReply(
+                    placeholder="*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\nl1jebywyzos2@10mail.info\nabc123@gmail.com"
+                ))
         elif btn == BTN_DELETE_TYPE:
             await _show_delete_type_menu_inline(chat_id, user_id)
         elif btn == BTN_STOCK:
