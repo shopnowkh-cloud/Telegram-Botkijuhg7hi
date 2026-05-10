@@ -1354,8 +1354,8 @@ async def show_account_selection(chat_id):
             if len(accs) > 0
         ]
     if not available:
-        await send_msg(chat_id, "_សូមអភ័យទោស អស់ពីស្តុក 🪤_",
-                       parse_mode=ParseMode.MARKDOWN)
+        await send_msg(chat_id, "<i>សូមអភ័យទោស អស់ពីស្តុក 🪤</i>",
+                       parse_mode=ParseMode.HTML)
         return
     rows = []
     for at, count, price in available:
@@ -2953,8 +2953,8 @@ async def _handle_callback_locked(cq, user, user_id, chat_id, data):
             await cq.answer()
             at = (_account_type_from_callback_id(data[13:]) if data.startswith("out_of_stock:")
                   else data.replace("out_of_stock_", "")) or "នេះ"
-            await send_msg(chat_id, f"_សូមអភ័យទោស គូប៉ុង {at} អស់ពីស្តុក 🪤_",
-                           parse_mode=ParseMode.MARKDOWN)
+            await send_msg(chat_id, f"<i>សូមអភ័យទោស គូប៉ុង {at} អស់ពីស្តុក 🪤</i>",
+                           parse_mode=ParseMode.HTML)
             return
 
         # ── Admin delete type: step 1 ─────────────────────────────────────────
