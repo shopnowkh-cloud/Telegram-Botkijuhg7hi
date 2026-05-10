@@ -2873,6 +2873,7 @@ async def on_admin_session_message(client, message):
                     f"```\n🔹 ចំនួន: {len(new_accounts)}\n🔹 ប្រភេទ: {account_type}\n🔹 តម្លៃ: {price}$\n```",
                     parse_mode=ParseMode.MARKDOWN)
                 logger.info(f"Admin {user_id} added {len(new_accounts)} accounts of type {account_type} @ ${price}")
+                await send_admin_settings_menu(chat_id)
             except ValueError:
                 await send_msg(chat_id, "តម្លៃមិនត្រឹមត្រូវ។ សូមបញ្ចូលតម្លៃជាលេខ (ឧ: 5.99)")
             message.stop_propagation()
