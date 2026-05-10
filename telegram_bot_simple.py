@@ -2516,6 +2516,57 @@ async def _email_handle_new(chat_id: int, user_id: int):
     if not DROPMAIL_API_TOKEN:
         await send_msg(chat_id, "❌ DROPMAIL_API_TOKEN មិនទាន់កំណត់។", reply_markup=EMAIL_SUBMENU_KB)
         return
+
+    # ── Check token expiry before creating ──────────────────────────────────
+    info = await run_sync(_dropmail_check_token_info)
+    expires_val = info.get("expires") or "N/A"
+    remaining_val = info.get("remaining")
+
+    # Build a token-status footer line
+    if not info.get("valid"):
+        err = info.get("error", "")
+        err_line = f"\n⚠️ <code>{html.escape(err[:80])}</code>" if err else ""
+        await send_msg(
+            chat_id,
+            f"❌ <b>Dropmail Token មិនត្រឹមត្រូវ ឬផុតកំណត់!</b>\n"
+            f"Token: <code>{DROPMAIL_API_TOKEN[:6]}…{DROPMAIL_API_TOKEN[-4:]}</code>"
+            f"{err_line}\n\n"
+            f"ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីធ្វើបច្ចុប្បន្នភាព។",
+            reply_markup=EMAIL_SUBMENU_KB)
+        return
+
+    # Parse expiry string to compute days left (format varies: ISO or "N/A")
+    days_left = None
+    exp_display = expires_val
+    if expires_val and expires_val != "N/A":
+        try:
+            from datetime import datetime, timezone
+            # Try ISO 8601 parse
+            exp_dt = datetime.fromisoformat(expires_val.replace("Z", "+00:00"))
+            days_left = (exp_dt - datetime.now(tz=timezone.utc)).days
+            exp_display = exp_dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    if days_left is not None and days_left < 0:
+        await send_msg(
+            chat_id,
+            f"❌ <b>Dropmail Token ផុតកំណត់រួចហើយ!</b>\n"
+            f"📅 Expire: <b>{exp_display}</b> ({abs(days_left)} ថ្ងៃមុន)\n\n"
+            f"ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីធ្វើបច្ចុប្បន្នភាព។",
+            reply_markup=EMAIL_SUBMENU_KB)
+        return
+
+    if days_left is not None and days_left <= 7:
+        token_status = f"⚠️ Token នឹងផុតក្នុង <b>{days_left} ថ្ងៃ</b> ({exp_display}) — សូមធ្វើបច្ចុប្បន្នភាព!"
+    elif days_left is not None:
+        rem_str = f" | 📊 Requests: {remaining_val}" if remaining_val is not None else ""
+        token_status = f"✅ Token ត្រឹមត្រូវ — នៅសល់ <b>{days_left} ថ្ងៃ</b> ({exp_display}){rem_str}"
+    else:
+        rem_str = f" | 📊 Requests: {remaining_val}" if remaining_val is not None else ""
+        token_status = f"✅ Token ត្រឹមត្រូវ{rem_str}"
+    # ────────────────────────────────────────────────────────────────────────
+
     try:
         result = await run_sync(_dropmail_create_session)
     except Exception as e:
@@ -2532,7 +2583,8 @@ async def _email_handle_new(chat_id: int, user_id: int):
     await send_msg(chat_id,
                    f"✅ <b>អ៊ីម៉ែលថ្មីបានបង្កើត!</b>\n\n"
                    f"📧 <code>{result['email']}</code>\n\n"
-                   f"👆 ចុចលើអ៊ីម៉ែលដើម្បីចម្លង។ Bot នឹងជូនដំណឹងភ្លាមៗពីសំបុត្រថ្មី។",
+                   f"👆 ចុចលើអ៊ីម៉ែលដើម្បីចម្លង។ Bot នឹងជូនដំណឹងភ្លាមៗពីសំបុត្រថ្មី។\n\n"
+                   f"🔑 {token_status}",
                    reply_markup=EMAIL_SUBMENU_KB)
 
 
