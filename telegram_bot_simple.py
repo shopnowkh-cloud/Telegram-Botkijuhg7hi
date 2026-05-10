@@ -1757,42 +1757,46 @@ async def _export_stock_inline(chat_id):
                 for acc in (sess.get("reserved_accounts") or []):
                     if isinstance(acc, dict) and acc.get("email"):
                         reserved_by_type.setdefault(t, []).append(str(acc["email"]))
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [f"Stock Report — {now_str}"]
         type_names = sorted(types)
-        total_avail, total_res = 0, 0
-        for t in type_names:
-            pool  = types.get(t) or []
-            avail = len(pool)
-            res   = reserved_by_type.get(t, [])
-            total_avail += avail
-            total_res   += len(res)
-            lines += ["", "=" * 70, f"Type    : {t}", f"Price   : ${prices.get(t,0)}",
-                      f"In stock: {avail}"]
-            if res:
-                lines.append(f"Reserved: {len(res)}")
-            lines.append("-" * 70)
-            for acc in pool:
-                if isinstance(acc, dict):
-                    em = acc.get("email")
-                    if em:
-                        lines.append(f"  • {em}")
-                    else:
-                        lines.append(f"  • {acc.get('phone','')} | {acc.get('password','')}")
-            if res:
-                lines.append("  [Reserved — active QR]")
-                for em in res:
-                    lines.append(f"  · {em}")
-        lines += ["", "=" * 70, f"Total types    : {len(type_names)}",
-                  f"Total in stock : {total_avail}", f"Total reserved : {total_res}"]
         if not type_names:
             await send_msg(chat_id, "📦 មិនមានប្រភេទ គូប៉ុង ឡើយទេ។",
                            reply_markup=ADMIN_SETTINGS_KB)
             return
-        fname = f"stock_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
-        cap   = (f"📦 ស្តុក គូប៉ុង — {len(type_names)} ប្រភេទ, {total_avail} នៅសល់"
-                 + (f", {total_res} កំពុងកក់ទុក" if total_res else ""))
-        await send_document(chat_id, "\n".join(lines).encode("utf-8"), fname, caption=cap)
+        total_avail, total_res = 0, 0
+        for t in type_names:
+            total_avail += len(types.get(t) or [])
+            total_res   += len(reserved_by_type.get(t, []))
+        header = (f"📦 <b>ស្តុក គូប៉ុង</b> — {len(type_names)} ប្រភេទ, {total_avail} នៅសល់"
+                  + (f", {total_res} កំពុងកក់ទុក" if total_res else ""))
+        await send_msg(chat_id, header)
+        for t in type_names:
+            pool  = types.get(t) or []
+            avail = len(pool)
+            res   = reserved_by_type.get(t, [])
+            email_lines = []
+            for acc in pool:
+                if isinstance(acc, dict):
+                    em = acc.get("email")
+                    if em:
+                        email_lines.append(f"• {html.escape(em)}")
+                    else:
+                        email_lines.append(f"• {html.escape(acc.get('phone',''))} | {html.escape(acc.get('password',''))}")
+            if res:
+                email_lines.append(f"\n🔒 <i>កំពុងកក់ទុក ({len(res)})</i>")
+                for em in res:
+                    email_lines.append(f"· {html.escape(em)}")
+            block = (f"<b>{html.escape(t)}</b>  💰 ${prices.get(t, 0)}  📦 {avail}\n"
+                     + ("\n".join(email_lines) if email_lines else "<i>(គ្មាន)</i>"))
+            # Split into chunks if block exceeds Telegram limit
+            MAX = 4000
+            while len(block) > MAX:
+                cut = block.rfind("\n", 0, MAX)
+                if cut == -1:
+                    cut = MAX
+                await send_msg(chat_id, block[:cut])
+                block = block[cut:].lstrip("\n")
+            if block:
+                await send_msg(chat_id, block)
     except Exception as e:
         logger.error(f"stock export failed: {e}")
         await send_msg(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>")
