@@ -2793,8 +2793,8 @@ async def on_admin_session_message(client, message):
                                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
-                               "*អ៊ីមែលមិនត្រឹមត្រូវតាមទម្រង់*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               "<b>អ៊ីមែលមិនត្រឹមត្រូវតាមទម្រង់</b>",
+                               reply_markup=ADD_ACCOUNT_KB)
             message.stop_propagation()
             return
 
