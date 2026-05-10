@@ -1931,7 +1931,7 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
             asyncio.create_task(run_sync(_save_sessions))
             await send_msg(
                 chat_id,
-                "<b>បញ្ចូលគូប៉ុងសម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖</b>",
+                "<b>បញ្ចូលគូប៉ុងសម្រាប់លក់</b>",
                 reply_markup=ADD_ACCOUNT_KB)
         elif btn == BTN_DELETE_TYPE:
             await _show_delete_type_menu_inline(chat_id, user_id)
