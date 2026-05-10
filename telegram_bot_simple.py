@@ -2784,8 +2784,8 @@ async def on_admin_session_message(client, message):
                 type_rows.append([KeyboardButton(BTN_BACK_SETTINGS)])
                 type_kb = ReplyKeyboardMarkup(type_rows, resize_keyboard=True, is_persistent=True)
                 await send_msg(chat_id,
-                               f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមជ្រើសរើស ឬបញ្ចូលប្រភេទ គូប៉ុង៖*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=type_kb)
+                               f"<b>បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមជ្រើសរើស ឬបញ្ចូលប្រភេទ គូប៉ុង៖</b>",
+                               reply_markup=type_kb)
             elif accounts:
                 all_d = intra_dupes + stock_dupes
                 await send_msg(chat_id,
