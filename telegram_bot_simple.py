@@ -2836,7 +2836,7 @@ async def on_admin_session_message(client, message):
                         chat_id,
                         f"❌ *មិនអាចបញ្ចូលបាន!*\n\nប្រភេទ `{account_type}` មានតម្លៃ *{existing_price}$* ស្រាប់។\n"
                         f"តម្លៃ *{price}$* មិនដូចគ្នា។ សូមប្រើ *{existing_price}$*",
-                        parse_mode=ParseMode.MARKDOWN)
+                        parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
                     message.stop_propagation()
                     return
                 seen, deduped = set(), []
