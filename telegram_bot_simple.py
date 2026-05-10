@@ -1797,6 +1797,7 @@ async def _export_stock_inline(chat_id):
                 block = block[cut:].lstrip("\n")
             if block:
                 await send_msg(chat_id, block)
+        await send_admin_settings_menu(chat_id)
     except Exception as e:
         logger.error(f"stock export failed: {e}")
         await send_msg(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>")
