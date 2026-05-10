@@ -1669,7 +1669,7 @@ async def _show_users_list_inline(chat_id):
 
 async def _show_delete_type_menu_inline(chat_id, user_id):
     async with _data_lock:
-        types = [t for t, accs in accounts_data.get("account_types", {}).items() if len(accs) > 0]
+        types = list(accounts_data.get("account_types", {}).keys())
     if not types:
         await send_msg(chat_id, "⚠️ <b>មិនមានប្រភេទ គូប៉ុង ណាមួយទេ!</b>")
         return
