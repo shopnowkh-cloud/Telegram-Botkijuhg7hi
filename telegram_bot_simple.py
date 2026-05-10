@@ -3286,31 +3286,19 @@ async def _email_poller(interval: int = 10):
                     from_addr = mail.get("fromAddr") or "unknown"
                     to_addr   = mail.get("toAddr") or email_addr
                     body      = (mail.get("text") or "").strip()
-                    otp_match = re.search(r'\b([0-9]{4,8})\b', body)
-                    otp_code  = otp_match.group(1) if otp_match else None
-                    if otp_code:
-                        text = (
-                            f"📩 <b>{html.escape(subject)}</b>\n\n"
-                            f"<code>{html.escape(to_addr)}</code>\n\n"
-                            f"<code>{otp_code}</code>"
-                        )
-                        try:
-                            target = int(CHANNEL_ID) if CHANNEL_ID else user_id
-                            await run_sync(_botapi_send_copy_button, target, text, otp_code)
-                        except Exception as e:
-                            logger.warning(f"[email_poller] otp notify failed: {e}")
-                    else:
-                        preview = body[:800] + "\n…" if len(body) > 800 else body
-                        text = (
-                            f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
-                            f"📧 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
-                            f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}\n"
-                        )
-                        try:
-                            target = int(CHANNEL_ID) if CHANNEL_ID else user_id
-                            await send_msg(target, text)
-                        except Exception as e:
-                            logger.warning(f"[email_poller] notify failed: {e}")
+                    preview = body[:1200] + "\n…" if len(body) > 1200 else body
+                    text = (
+                        f"📬 <b>អ៊ីម៉ែលថ្មីចូលមកដល់!</b>\n\n"
+                        f"📨 ប្រធានបទ: <b>{html.escape(subject)}</b>\n"
+                        f"📧 ពី: <code>{html.escape(from_addr)}</code>\n"
+                        f"📥 ទៅ: <code>{html.escape(to_addr)}</code>\n\n"
+                        f"{html.escape(preview) if preview else '<i>(ទទេ)</i>'}"
+                    )
+                    try:
+                        target = int(CHANNEL_ID) if CHANNEL_ID else user_id
+                        await send_msg(target, text)
+                    except Exception as e:
+                        logger.warning(f"[email_poller] notify failed: {e}")
                     newest_id = mail_id
                 if newest_id:
                     await run_sync(_email_history_update_last_mail, entry_id, newest_id)
