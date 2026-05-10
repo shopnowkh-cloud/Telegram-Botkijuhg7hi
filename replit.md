@@ -60,6 +60,20 @@ Pyrogram handles the MTProto connection automatically — no webhook management 
 ## Session File
 `bot_session.session` is created in the project root on first run. Pyrogram stores its MTProto session there.
 
+## ⚠️ Moving to a VPS
+When deploying this code to a new VPS or any other environment:
+
+- **Do NOT copy** `bot_session.session` — it is tied to the machine/environment it was created on and will cause a `USER_DEACTIVATED` or auth error if moved.
+- **Delete** any existing `bot_session.session` file before starting the bot on the new server. Pyrogram will create a fresh one automatically.
+- **Re-enter all secrets** as environment variables on the VPS (`.env` file or export commands):
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_API_ID`
+  - `TELEGRAM_API_HASH`
+  - `BAKONG_TOKEN`
+  - `NEON_DATABASE_URL`
+  - `DROPMAIL_API_TOKEN`
+- **Database data is preserved** — since the bot uses Neon Postgres (cloud), all accounts, purchase history, and settings remain intact across environments. Only the session file and secrets need to be set up fresh.
+
 ## Admin-Managed Settings (persisted in `bot_settings` DB table)
 | Key | Description |
 |---|---|
