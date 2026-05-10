@@ -1028,8 +1028,7 @@ BTN_MAINTENANCE       = "🛠 Maintenance Mode"
 BTN_BROADCAST         = "📢 ផ្សាយព័ត៌មាន"
 BTN_BACK_SETTINGS     = "↩️ ត្រឡប់ទៅកំណត់"
 BTN_PAYMENT_EDIT      = "✏️ ប្តូរឈ្មោះ Payment"
-BTN_BAKONG_RELAY_EDIT = "✏️ ប្តូរ Relay Token"
-BTN_BAKONG_API_EDIT   = "✏️ ប្តូរ Bakong API Token"
+BTN_BAKONG_API_EDIT   = "✏️ ប្តូរ Bakong Token"
 BTN_CHANNEL_EDIT      = "✏️ ប្តូរ Channel ID"
 BTN_CHANNEL_CLEAR     = "🗑 លុប Channel ID"
 BTN_ADMIN_ADD         = "➕ បន្ថែម Admin"
@@ -1056,7 +1055,7 @@ BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
-    BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_RELAY_EDIT, BTN_BAKONG_API_EDIT,
+    BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_API_EDIT,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR, BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
@@ -1091,7 +1090,6 @@ PAYMENT_SUBMENU_KB = ReplyKeyboardMarkup(
     resize_keyboard=True, is_persistent=True)
 
 BAKONG_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_BAKONG_RELAY_EDIT)],
     [KeyboardButton(BTN_BAKONG_API_EDIT)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
@@ -1822,15 +1820,11 @@ async def _show_payment_inline(chat_id):
 
 
 async def _show_bakong_inline(chat_id):
-    relay  = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else "(មិនទាន់កំណត់)"
-    api_t  = BAKONG_API_TOKEN   if BAKONG_API_TOKEN   else "(មិនទាន់កំណត់)"
-    active = "Relay ✅" if BAKONG_RELAY_TOKEN else "Bakong API ✅"
+    api_t = BAKONG_API_TOKEN if BAKONG_API_TOKEN else "(មិនទាន់កំណត់)"
     await send_msg(
         chat_id,
-        f"🔑 <b>Bakong Tokens បច្ចុប្បន្ន៖</b>\n\n"
-        f"🔵 <b>Relay Token:</b>\n<code>{html.escape(relay)}</code>\n\n"
-        f"🟠 <b>Bakong API Token:</b>\n<code>{html.escape(api_t)}</code>\n\n"
-        f"<i>Active: {active}</i>",
+        f"🔑 <b>Bakong Token បច្ចុប្បន្ន៖</b>\n\n"
+        f"<code>{html.escape(api_t)}</code>",
         reply_markup=BAKONG_SUBMENU_KB)
 
 
@@ -1883,12 +1877,9 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
         elif btn == BTN_PAYMENT_EDIT:
             await _prompt_admin_input(chat_id, user_id, "payment",
                                       "💳 សូមផ្ញើ <b>ឈ្មោះ Payment</b> ថ្មី:")
-        elif btn == BTN_BAKONG_RELAY_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "bakong_relay",
-                                      "🔵 សូមផ្ញើ <b>Relay Token</b> ថ្មី (ចាប់ផ្ដើមមាន <code>rbk...</code>):")
         elif btn == BTN_BAKONG_API_EDIT:
             await _prompt_admin_input(chat_id, user_id, "bakong_api",
-                                      "🟠 សូមផ្ញើ <b>Bakong API Token</b> ថ្មី (JWT):")
+                                      "🔑 សូមផ្ញើ <b>Bakong Token</b> ថ្មី:")
         elif btn == BTN_CHANNEL_EDIT:
             await _prompt_admin_input(chat_id, user_id, "channel",
                                       "📢 សូមផ្ញើ <b>Channel ID</b> ថ្មី (ឧ. <code>-1001234567890</code>):")
@@ -1965,26 +1956,19 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
                        reply_markup=_main_kb(user_id))
         return True
 
-    if key in ("bakong", "bakong_relay", "bakong_api"):
+    if key in ("bakong", "bakong_api"):
         if not raw:
             await send_msg(chat_id, "សូមផ្ញើ Bakong token ថ្មី (ឬចុច 🚫 បោះបង់)")
             return True
-        is_relay = raw.startswith("rbk") or key == "bakong_relay"
-        if not is_relay:
-            try:
-                KHQR(raw)
-            except Exception as e:
-                await send_msg(chat_id, f"❌ Token មិនត្រឹមត្រូវ៖ <code>{html.escape(str(e))}</code>")
-                return True
-        if is_relay:
-            BAKONG_RELAY_TOKEN = raw
-            await run_sync(_set_setting, "BAKONG_RELAY_TOKEN", raw)
-            label = "Relay Token"
-        else:
-            BAKONG_API_TOKEN = raw
-            await run_sync(_set_setting, "BAKONG_API_TOKEN", raw)
-            label = "Bakong API Token"
-        BAKONG_TOKEN = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
+        try:
+            KHQR(raw)
+        except Exception as e:
+            await send_msg(chat_id, f"❌ Token មិនត្រឹមត្រូវ៖ <code>{html.escape(str(e))}</code>")
+            return True
+        BAKONG_API_TOKEN = raw
+        await run_sync(_set_setting, "BAKONG_API_TOKEN", raw)
+        label = "Bakong Token"
+        BAKONG_TOKEN = BAKONG_API_TOKEN
         try:
             khqr_client = KHQR(BAKONG_TOKEN)
         except Exception:
