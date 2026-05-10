@@ -1764,6 +1764,7 @@ async def _export_buyers_report_inline(chat_id):
         fname = f"buyers_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
         await send_document(chat_id, "\n".join(lines).encode("utf-8"), fname,
                             caption=f"📋 របាយការណ៍ទិញ — {len(grouped)} អ្នក​ទិញ, {total_emails} email")
+        await send_admin_settings_menu(chat_id)
     except Exception as e:
         logger.error(f"buyers export failed: {e}")
         await send_msg(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>")
