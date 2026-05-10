@@ -1720,23 +1720,50 @@ async def _export_buyers_report_inline(chat_id):
                                               "when": str(row.get("purchased_at") or ""),
                                               "emails": emails})
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [f"Buyers Report — {now_str}", f"Total buyers: {len(grouped)}", "=" * 70]
         total_emails = 0
+        W = 60
+        lines = [
+            "=" * W,
+            "  BUYERS REPORT".center(W),
+            f"  {now_str}".center(W),
+            "=" * W,
+            f"  Total buyers : {len(grouped)}",
+        ]
         for uid, info in grouped.items():
             fn = (info["first_name"] + " " + info["last_name"]).strip() or "(no name)"
             un = f"@{info['username']}" if info["username"] else "—"
-            lines += ["", f"User ID : {uid}", f"Name    : {fn}", f"Username: {un}",
-                      f"Purchases ({len(info['purchases'])}):"  ]
-            for p in info["purchases"]:
-                lines.append(f"  [{p['when']}] {p['type']} x{p['qty']} = ${p['price']}")
+            lines += [
+                "",
+                "─" * W,
+                f"  ID       : {uid}",
+                f"  Name     : {fn}",
+                f"  Username : {un}",
+                f"  Purchases: {len(info['purchases'])}",
+                "─" * W,
+            ]
+            for i, p in enumerate(info["purchases"], 1):
+                when = p["when"][:19] if len(p["when"]) >= 19 else p["when"]
+                lines += [
+                    f"  [{i}] {p['type']}",
+                    f"      Qty   : {p['qty']}",
+                    f"      Price : ${p['price']}",
+                    f"      Date  : {when}",
+                    f"      Emails:",
+                ]
                 for em in p["emails"]:
-                    lines.append(f"      • {em}")
+                    lines.append(f"        • {em}")
                     total_emails += 1
-            lines.append("-" * 70)
-        lines += ["", f"Total emails delivered: {total_emails}"]
+                if not p["emails"]:
+                    lines.append("        (none)")
+        lines += [
+            "",
+            "=" * W,
+            f"  Total emails delivered : {total_emails}".ljust(W - 2),
+            "=" * W,
+        ]
         fname = f"buyers_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
         await send_document(chat_id, "\n".join(lines).encode("utf-8"), fname,
-                            caption=f"📋 Buyers report — {len(grouped)} អ្នក​ទិញ, {total_emails} email")
+                            caption=f"📋 របាយការណ៍ទិញ — {len(grouped)} អ្នក​ទិញ, {total_emails} email")
     except Exception as e:
         logger.error(f"buyers export failed: {e}")
         await send_msg(chat_id, f"❌ Error: <code>{html.escape(str(e))}</code>")
