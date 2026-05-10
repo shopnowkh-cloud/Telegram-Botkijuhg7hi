@@ -2808,13 +2808,12 @@ async def on_admin_session_message(client, message):
             if existing_price is not None:
                 await send_msg(
                     chat_id,
-                    f"*ប្រភេទ `{account_type_input}` មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\n"
-                    f"តម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម គូប៉ុង:*",
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                    f"<b>ប្រភេទ <code>{account_type_input}</code> មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\nតម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម គូប៉ុង</b>",
+                    reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
-                               f"*សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {account_type_input}*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               f"<b>សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {account_type_input}</b>",
+                               reply_markup=ADD_ACCOUNT_KB)
             message.stop_propagation()
             return
 
@@ -2833,9 +2832,8 @@ async def on_admin_session_message(client, message):
                 if existing_price is not None and round(existing_price, 4) != round(price, 4):
                     await send_msg(
                         chat_id,
-                        f"❌ *មិនអាចបញ្ចូលបាន!*\n\nប្រភេទ `{account_type}` មានតម្លៃ *{existing_price}$* ស្រាប់។\n"
-                        f"តម្លៃ *{price}$* មិនដូចគ្នា។ សូមប្រើ *{existing_price}$*",
-                        parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                        f"❌ <b>មិនអាចបញ្ចូលបាន!</b>\n\nប្រភេទ <code>{account_type}</code> មានតម្លៃ <b>{existing_price}$</b> ស្រាប់។\nតម្លៃ <b>{price}$</b> មិនដូចគ្នា។ សូមប្រើ <b>{existing_price}$</b>",
+                        reply_markup=ADD_ACCOUNT_KB)
                     message.stop_propagation()
                     return
                 seen, deduped = set(), []
