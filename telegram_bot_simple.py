@@ -35,7 +35,7 @@ from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ForceReply,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
 )
 from pyrogram.errors import (
     MessageDeleteForbidden, MessageNotModified, FloodWait,
@@ -1933,10 +1933,7 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
                 chat_id,
                 "*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\n"
                 "```\nl1jebywyzos2@10mail.info\nabc123@gmail.com\n```",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=ForceReply(
-                    placeholder="*បញ្ចូល គូប៉ុង សម្រាប់លក់ (អ៊ីមែលម្តងមួយបន្ទាត់)៖*\n\nl1jebywyzos2@10mail.info\nabc123@gmail.com"
-                ))
+                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
         elif btn == BTN_DELETE_TYPE:
             await _show_delete_type_menu_inline(chat_id, user_id)
         elif btn == BTN_STOCK:
@@ -2785,16 +2782,16 @@ async def on_admin_session_message(client, message):
                 asyncio.create_task(run_sync(_save_sessions))
                 await send_msg(chat_id,
                                f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             elif accounts:
                 all_d = intra_dupes + stock_dupes
                 await send_msg(chat_id,
                                f"❌ *មិនអាចបញ្ចូលបាន!*\n\nអ៊ីមែលទាំងអស់ស្ទួន:\n```\n{chr(10).join(all_d)}\n```",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
                                "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ! ទម្រង់:*\n\n```\nl1jebywyzos2@10mail.info\n```",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             message.stop_propagation()
             return
 
@@ -2810,11 +2807,11 @@ async def on_admin_session_message(client, message):
                     chat_id,
                     f"*ប្រភេទ `{account_type_input}` មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\n"
                     f"តម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម គូប៉ុង:*",
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
+                    parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
                                f"*សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {account_type_input}*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             message.stop_propagation()
             return
 
