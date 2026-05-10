@@ -107,8 +107,9 @@ BAKONG_API_TOKEN   = os.environ.get("BAKONG_TOKEN", "")
 BAKONG_TOKEN       = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
 khqr_client        = KHQR(BAKONG_TOKEN) if BAKONG_TOKEN else None
 
-DROPMAIL_API_TOKEN = os.environ.get("DROPMAIL_API_TOKEN", "")
-_DROPMAIL_URL      = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
+DROPMAIL_API_TOKEN    = os.environ.get("DROPMAIL_API_TOKEN", "")
+DROPMAIL_TOKEN_EXPIRY = ""
+_DROPMAIL_URL         = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
 
 
 def is_admin(uid) -> bool:
@@ -1866,8 +1867,6 @@ def _days_status(days_left) -> str:
 
 async def _send_combined_token_info(chat_id: int, reply_markup) -> None:
     """Build and send the combined Bakong + Dropmail token info message."""
-    # Kick off Dropmail API call immediately (runs in thread pool)
-    dropmail_task = asyncio.create_task(run_sync(_dropmail_check_token_info)) if DROPMAIL_API_TOKEN else None
 
     lines = ["🔑 <b>Token Info</b>\n"]
 
@@ -1892,26 +1891,17 @@ async def _send_combined_token_info(chat_id: int, reply_markup) -> None:
     else:
         dm_masked = DROPMAIL_API_TOKEN[:6] + "…" + DROPMAIL_API_TOKEN[-4:]
         lines.append(f"Token: <code>{html.escape(dm_masked)}</code>")
-        info = await dropmail_task
-        if not info.get("valid"):
-            err = info.get("error", "")
-            err_part = f" — <code>{html.escape(err[:60])}</code>" if err else ""
-            lines.append(f"⏳ ស្ថានភាព: ❌ មិនត្រឹមត្រូវ{err_part}")
+        if DROPMAIL_TOKEN_EXPIRY:
+            try:
+                exp_dt2 = datetime.strptime(DROPMAIL_TOKEN_EXPIRY, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                dm_days = (exp_dt2 - datetime.now(tz=timezone.utc)).days
+                lines.append(f"📅 Expire: <b>{DROPMAIL_TOKEN_EXPIRY}</b>")
+                lines.append(f"⏳ ស្ថានភាព: {_days_status(dm_days)}")
+            except Exception:
+                lines.append(f"📅 Expire: <b>{html.escape(DROPMAIL_TOKEN_EXPIRY)}</b>")
+                lines.append("⏳ ស្ថានភាព: ✅ Active")
         else:
-            expires_val   = info.get("expires") or "N/A"
-            remaining_val = info.get("remaining")
-            dm_days, exp_display = None, expires_val
-            if expires_val and expires_val != "N/A":
-                try:
-                    exp_dt2 = datetime.fromisoformat(expires_val.replace("Z", "+00:00"))
-                    dm_days     = (exp_dt2 - datetime.now(tz=timezone.utc)).days
-                    exp_display = exp_dt2.strftime("%Y-%m-%d %H:%M UTC")
-                except Exception:
-                    pass
-            lines.append(f"📅 Expire: <b>{exp_display}</b>")
-            lines.append(f"⏳ ស្ថានភាព: {_days_status(dm_days)}")
-            if remaining_val is not None:
-                lines.append(f"📊 Requests remaining: <b>{remaining_val}</b>")
+            lines.append("📅 Expire: <b>មិន​ទាន់​កំណត់</b> — ចុច ✏️ ប្តូរ Token ដើម្បីកំណត់")
 
     await send_msg(chat_id, "\n".join(lines), reply_markup=reply_markup)
 
@@ -2023,7 +2013,7 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
 
 
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
-    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, _DROPMAIL_URL
+    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, DROPMAIL_TOKEN_EXPIRY, _DROPMAIL_URL
     raw = (text or "").strip()
     cancel_words = {"បោះបង់", "🚫 បោះបង់"}
     if raw in cancel_words or raw == BTN_BACK_SETTINGS:
@@ -2134,12 +2124,35 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
         await run_sync(_set_setting, "DROPMAIL_API_TOKEN", raw)
         asyncio.create_task(delete_msg(chat_id, message_id))
         async with _data_lock:
-            user_sessions.pop(user_id, None)
+            user_sessions[user_id] = {"state": "admin_input:dropmail_expiry"}
         asyncio.create_task(run_sync(_save_sessions))
         await send_msg(
             chat_id,
             f"✅ បានប្តូរ <b>Dropmail API Token</b>\n"
-            f"Prefix: <code>{html.escape(raw[:8])}…</code>",
+            f"Prefix: <code>{html.escape(raw[:8])}…</code>\n\n"
+            f"📅 សូមផ្ញើ <b>ថ្ងៃផុតកំណត់</b> (YYYY-MM-DD)\n"
+            f"ឧ. <code>2026-12-31</code>\n"
+            f"ឬចុច <b>🚫 បោះបង់</b> ដើម្បីរំលង",
+            reply_markup=CANCEL_INPUT_KB)
+        return True
+
+    if key == "dropmail_expiry":
+        if not raw:
+            await send_msg(chat_id, "📅 សូមផ្ញើ​ថ្ងៃ​ផុត​កំណត់ (YYYY-MM-DD) ឬចុច 🚫 បោះបង់")
+            return True
+        try:
+            datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError:
+            await send_msg(chat_id, "❌ ទម្រង់ថ្ងៃ​មិន​ត្រឹម​ត្រូវ។ សូម​ប្រើ​ទម្រង់ <code>YYYY-MM-DD</code> (ឧ. <code>2026-12-31</code>)")
+            return True
+        DROPMAIL_TOKEN_EXPIRY = raw
+        await run_sync(_set_setting, "DROPMAIL_TOKEN_EXPIRY", raw)
+        async with _data_lock:
+            user_sessions.pop(user_id, None)
+        asyncio.create_task(run_sync(_save_sessions))
+        await send_msg(
+            chat_id,
+            f"✅ បានកំណត់ <b>Dropmail Token Expire</b>: <code>{html.escape(raw)}</code>",
             reply_markup=EMAIL_SUBMENU_KB)
         return True
 
@@ -3358,6 +3371,11 @@ async def _on_startup():
         DROPMAIL_API_TOKEN = _sv
         _DROPMAIL_URL = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
         logger.info(f"Loaded DROPMAIL_API_TOKEN from DB: {DROPMAIL_API_TOKEN[:6]}…")
+
+    _sv = await run_sync(_get_setting, "DROPMAIL_TOKEN_EXPIRY")
+    if _sv:
+        DROPMAIL_TOKEN_EXPIRY = _sv
+        logger.info(f"Loaded DROPMAIL_TOKEN_EXPIRY from DB: {DROPMAIL_TOKEN_EXPIRY}")
 
     # Load data and sessions into memory
     data = await run_sync(_load_data)
