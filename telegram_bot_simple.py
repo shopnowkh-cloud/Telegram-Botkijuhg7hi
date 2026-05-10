@@ -1061,9 +1061,6 @@ BTN_CLONE_BOT_SET     = "✏️ កំណត់ Bot Token"
 BTN_CLONE_BOT_STOP    = "⛔ បិទ Clone Bot"
 BTN_CLONE_BOT_START   = "▶️ បើក Clone Bot"
 
-BTN_TELEGRAM_API      = "🔐 Telegram API"
-BTN_TG_API_ID_EDIT    = "✏️ ប្តូរ API ID"
-BTN_TG_API_HASH_EDIT  = "✏️ ប្តូរ API Hash"
 
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
@@ -1074,7 +1071,6 @@ ADMIN_BUTTON_LABELS = {
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
     BTN_EMAIL_TOKEN_EDIT, BTN_EMAIL_TOKEN_INFO,
     BTN_CLONE_BOT, BTN_CLONE_BOT_SET, BTN_CLONE_BOT_STOP, BTN_CLONE_BOT_START,
-    BTN_TELEGRAM_API, BTN_TG_API_ID_EDIT, BTN_TG_API_HASH_EDIT,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -1092,7 +1088,7 @@ ADMIN_SETTINGS_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_PAYMENT),      KeyboardButton(BTN_BAKONG)],
     [KeyboardButton(BTN_CHANNEL),      KeyboardButton(BTN_ADMINS)],
     [KeyboardButton(BTN_MAINTENANCE),  KeyboardButton(BTN_BROADCAST)],
-    [KeyboardButton(BTN_TELEGRAM_API), KeyboardButton(BTN_CLONE_BOT)],
+    [KeyboardButton(BTN_CLONE_BOT)],
 ], resize_keyboard=True, is_persistent=True)
 
 CANCEL_INPUT_KB = ReplyKeyboardMarkup(
@@ -1147,11 +1143,6 @@ CLONE_BOT_SUBMENU_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
-TELEGRAM_API_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_TG_API_ID_EDIT)],
-    [KeyboardButton(BTN_TG_API_HASH_EDIT)],
-    [KeyboardButton(BTN_BACK_SETTINGS)],
-], resize_keyboard=True, is_persistent=True)
 
 CHECK_PAYMENT_INLINE = InlineKeyboardMarkup([
     [InlineKeyboardButton("🚫 បោះបង់", callback_data="cancel_purchase")]
@@ -2241,23 +2232,6 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
                 "<i>⚠️ Token នឹងត្រូវបានលុបចោលស្វ័យប្រវត្តិ — ផ្ញើដោយប្រុងប្រយ័ត្ន!</i>")
         elif btn == BTN_EMAIL_TOKEN_INFO:
             await _email_show_token_info(chat_id)
-        elif btn == BTN_TELEGRAM_API:
-            current_id = API_ID or "—"
-            masked_hash = (API_HASH[:6] + "…" + API_HASH[-4:]) if len(API_HASH) > 10 else (API_HASH or "—")
-            await send_msg(chat_id,
-                f"🔐 <b>Telegram API Credentials</b>\n\n"
-                f"API ID: <code>{current_id}</code>\n"
-                f"API Hash: <code>{masked_hash}</code>\n\n"
-                f"<i>ការផ្លាស់ប្តូរ API ID / Hash ត្រូវការ restart bot។</i>",
-                reply_markup=TELEGRAM_API_SUBMENU_KB)
-        elif btn == BTN_TG_API_ID_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "tg_api_id",
-                                      "🔐 សូមផ្ញើ <b>Telegram API ID</b> ថ្មី (លេខ):\n\n"
-                                      "<i>ទទួលបានពី https://my.telegram.org</i>")
-        elif btn == BTN_TG_API_HASH_EDIT:
-            await _prompt_admin_input(chat_id, user_id, "tg_api_hash",
-                                      "🔐 សូមផ្ញើ <b>Telegram API Hash</b> ថ្មី:\n\n"
-                                      "<i>ទទួលបានពី https://my.telegram.org</i>")
         elif btn == BTN_CLONE_BOT:
             await _show_clone_bot_inline(chat_id)
         elif btn == BTN_CLONE_BOT_SET:
@@ -2281,7 +2255,7 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
 
 
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
-    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, _DROPMAIL_URL, API_ID, API_HASH
+    global PAYMENT_NAME, BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, CHANNEL_ID, EXTRA_ADMIN_IDS, DROPMAIL_API_TOKEN, _DROPMAIL_URL
     raw = (text or "").strip()
     cancel_words = {"បោះបង់", "🚫 បោះបង់"}
     if raw in cancel_words or raw == BTN_BACK_SETTINGS:
@@ -2426,42 +2400,6 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
             "❓ <b>តើ​អ្នក​ប្រាកដ​ជា​ចង់​ផ្សាយ​សារ​ខាង​លើ​នេះ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់​មែន​ទេ?</b>\n\n"
             "ចុច <b>✅ បញ្ជាក់ផ្សាយ</b> ឬ <b>🚫 បោះបង់ការផ្សាយ</b>",
             reply_markup=BROADCAST_CONFIRM_KB)
-        return True
-
-    if key == "tg_api_id":
-        if not raw:
-            await send_msg(chat_id, "🔐 សូមផ្ញើ <b>Telegram API ID</b> ថ្មី (លេខ) (ឬចុច 🚫 បោះបង់)")
-            return True
-        if not raw.isdigit():
-            await send_msg(chat_id, "❌ API ID ត្រូវតែជាលេខ (ឧ. <code>12345678</code>)")
-            return True
-        API_ID = int(raw)
-        await run_sync(_set_setting, "TELEGRAM_API_ID", raw)
-        asyncio.create_task(delete_msg(chat_id, message_id))
-        async with _data_lock:
-            user_sessions.pop(user_id, None)
-        asyncio.create_task(run_sync(_save_sessions))
-        await send_msg(chat_id,
-                       f"✅ បានរក្សាទុក <b>API ID</b>: <code>{raw}</code>\n\n"
-                       f"<i>⚠️ restart bot ដើម្បីឲ្យប្រើប្រាស់ ID ថ្មី</i>",
-                       reply_markup=TELEGRAM_API_SUBMENU_KB)
-        return True
-
-    if key == "tg_api_hash":
-        if not raw:
-            await send_msg(chat_id, "🔐 សូមផ្ញើ <b>Telegram API Hash</b> ថ្មី (ឬចុច 🚫 បោះបង់)")
-            return True
-        API_HASH = raw
-        await run_sync(_set_setting, "TELEGRAM_API_HASH", raw)
-        asyncio.create_task(delete_msg(chat_id, message_id))
-        async with _data_lock:
-            user_sessions.pop(user_id, None)
-        asyncio.create_task(run_sync(_save_sessions))
-        masked = raw[:6] + "…" + raw[-4:]
-        await send_msg(chat_id,
-                       f"✅ បានរក្សាទុក <b>API Hash</b>: <code>{masked}</code>\n\n"
-                       f"<i>⚠️ restart bot ដើម្បីឲ្យប្រើប្រាស់ Hash ថ្មី</i>",
-                       reply_markup=TELEGRAM_API_SUBMENU_KB)
         return True
 
     if key == "admin_bot_token":
