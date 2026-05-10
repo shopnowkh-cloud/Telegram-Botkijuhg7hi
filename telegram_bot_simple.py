@@ -2793,7 +2793,7 @@ async def on_admin_session_message(client, message):
                                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
-                               "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ! ទម្រង់:*\n\n```\nl1jebywyzos2@10mail.info\n```",
+                               "*អ៊ីមែលមិនត្រឹមត្រូវតាមទម្រង់*",
                                parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
             message.stop_propagation()
             return
