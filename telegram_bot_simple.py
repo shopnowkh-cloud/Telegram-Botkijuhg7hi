@@ -1857,34 +1857,26 @@ async def _bakong_show_token_info(chat_id: int):
 
     lines = ["🔑 <b>Bakong Token Info</b>\n"]
 
-    for label, tok in [("Bakong API Token", token), ("Bakong Relay Token", relay)]:
-        if not tok:
-            continue
-        masked = tok[:10] + "…"
-        is_relay = tok.startswith("rbk")
-        if is_relay:
-            lines.append(f"<b>{label}:</b> <code>{html.escape(masked)}</code>")
-            lines.append("📋 ប្រភេទ: Relay Token (មិនមាន expiry)\n")
-        else:
-            exp_dt, days_left = _decode_jwt_expiry(tok)
-            lines.append(f"<b>{label}:</b> <code>{html.escape(masked)}</code>")
-            if exp_dt:
-                exp_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
-                if days_left < 0:
-                    status = f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
-                elif days_left == 0:
-                    status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
-                elif days_left <= 7:
-                    status = f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
-                else:
-                    status = f"✅ នៅសល់ {days_left} ថ្ងៃ"
-                lines.append(f"📅 Expire: <b>{exp_str}</b>")
-                lines.append(f"⏳ ស្ថានភាព: {status}\n")
-            else:
-                lines.append("📅 Expire: <b>មិនអាចបំបែក JWT បាន</b>\n")
-
-    if not token and not relay:
+    if not token:
         lines.append("❌ មិនទាន់មាន Token ទេ។")
+    else:
+        masked = token[:10] + "…"
+        exp_dt, days_left = _decode_jwt_expiry(token)
+        lines.append(f"<b>Bakong API Token:</b> <code>{html.escape(masked)}</code>")
+        if exp_dt:
+            exp_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
+            if days_left < 0:
+                status = f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
+            elif days_left == 0:
+                status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
+            elif days_left <= 7:
+                status = f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
+            else:
+                status = f"✅ នៅសល់ {days_left} ថ្ងៃ"
+            lines.append(f"📅 Expire: <b>{exp_str}</b>")
+            lines.append(f"⏳ ស្ថានភាព: {status}")
+        else:
+            lines.append("📅 Expire: <b>មិនអាចបំបែក JWT បាន</b>")
 
     await send_msg(chat_id, "\n".join(lines), reply_markup=BAKONG_SUBMENU_KB)
 
