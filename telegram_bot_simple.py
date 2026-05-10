@@ -2785,16 +2785,16 @@ async def on_admin_session_message(client, message):
                 asyncio.create_task(run_sync(_save_sessions))
                 await send_msg(chat_id,
                                f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
             elif accounts:
                 all_d = intra_dupes + stock_dupes
                 await send_msg(chat_id,
                                f"❌ *មិនអាចបញ្ចូលបាន!*\n\nអ៊ីមែលទាំងអស់ស្ទួន:\n```\n{chr(10).join(all_d)}\n```",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
             else:
                 await send_msg(chat_id,
                                "*មិនរកឃើញអ៊ីមែលត្រឹមត្រូវ! ទម្រង់:*\n\n```\nl1jebywyzos2@10mail.info\n```",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
             message.stop_propagation()
             return
 
@@ -2810,11 +2810,11 @@ async def on_admin_session_message(client, message):
                     chat_id,
                     f"*ប្រភេទ `{account_type_input}` មានស្រាប់ ដែលមានតម្លៃ {existing_price}$\n\n"
                     f"តម្លៃត្រូវតែដូចគ្នា ({existing_price}$) ដើម្បីបន្ថែម គូប៉ុង:*",
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                    parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
             else:
                 await send_msg(chat_id,
                                f"*សូមដាក់តម្លៃក្នុងប្រភេទ គូប៉ុង {account_type_input}*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=ForceReply())
             message.stop_propagation()
             return
 
