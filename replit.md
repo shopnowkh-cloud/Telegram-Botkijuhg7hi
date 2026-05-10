@@ -60,18 +60,54 @@ Pyrogram handles the MTProto connection automatically — no webhook management 
 ## Session File
 `bot_session.session` is created in the project root on first run. Pyrogram stores its MTProto session there.
 
-## ⚠️ Moving to a VPS
-When deploying this code to a new VPS or any other environment:
+## 🖥️ Deploy to VPS (24/7 via systemd)
 
-- **Do NOT copy** `bot_session.session` — it is tied to the machine/environment it was created on and will cause a `USER_DEACTIVATED` or auth error if moved.
-- **Delete** any existing `bot_session.session` file before starting the bot on the new server. Pyrogram will create a fresh one automatically.
-- **4 environment variables are required** on the VPS (`.env` file or export commands):
-  - `TELEGRAM_BOT_TOKEN`
-  - `TELEGRAM_API_ID`
-  - `TELEGRAM_API_HASH`
-  - `NEON_DATABASE_URL`
-- **BAKONG_TOKEN and DROPMAIL_API_TOKEN** are optional env vars — if not set, they are loaded automatically from the database (configured via the admin panel: ⚙️ Settings → 🔑 Bakong Token / 📧 Email).
-- **Database data is preserved** — since the bot uses Neon Postgres (cloud), all accounts, purchase history, settings, and credentials remain intact across environments. Only the 4 env vars above need to be set on the new server.
+### Files included for VPS deployment
+| File | Purpose |
+|---|---|
+| `setup.sh` | One-time setup script (run as root on Ubuntu/Debian) |
+| `telegram-bot.service` | systemd service — auto-start, auto-restart on crash |
+| `.env.example` | Template for environment variables |
+
+### Step-by-step (Termius / any SSH client)
+
+```bash
+# 1. Upload files to VPS (run from your local machine or Replit shell)
+scp telegram_bot_simple.py requirements.txt setup.sh telegram-bot.service .env.example root@YOUR_VPS_IP:/root/
+
+# 2. SSH into VPS
+ssh root@YOUR_VPS_IP
+
+# 3. Run setup (installs Python, venv, dependencies, registers systemd service)
+chmod +x setup.sh && sudo bash setup.sh
+
+# 4. Create your .env file from the template
+cp /root/.env.example /opt/telegram-bot/.env
+nano /opt/telegram-bot/.env   # fill in your 4 secrets
+
+# 5. Start the bot
+systemctl start telegram-bot
+
+# 6. Check it's running
+systemctl status telegram-bot
+
+# 7. Watch live logs
+journalctl -u telegram-bot -f
+```
+
+### Useful commands
+```bash
+systemctl stop telegram-bot        # Stop bot
+systemctl restart telegram-bot     # Restart bot
+systemctl disable telegram-bot     # Disable auto-start on boot
+journalctl -u telegram-bot -n 100  # Last 100 log lines
+```
+
+### ⚠️ Important notes
+- **Do NOT copy** `bot_session.session` — it is tied to the machine. The systemd service deletes it automatically before each start.
+- **4 secrets required** in `/opt/telegram-bot/.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `NEON_DATABASE_URL`
+- **BAKONG_TOKEN** is optional — loaded from the database if not set (admin panel ⚙️ Settings → 🔑 Bakong Token).
+- **Database data is preserved** — Neon Postgres is cloud-hosted. All data stays intact across VPS migrations.
 
 ## Admin-Managed Settings (persisted in `bot_settings` DB table)
 | Key | Description |

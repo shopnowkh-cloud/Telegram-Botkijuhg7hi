@@ -1,0 +1,27 @@
+[Unit]
+Description=Telegram Bot (Bakong KHQR)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/telegram-bot
+EnvironmentFile=/opt/telegram-bot/.env
+
+# Remove stale session file before starting to avoid lock errors
+ExecStartPre=/bin/rm -f /opt/telegram-bot/bot_session.session /opt/telegram-bot/bot_session.session-journal
+
+ExecStart=/opt/telegram-bot/venv/bin/python3 telegram_bot_simple.py
+
+# Auto-restart on crash
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=telegram-bot
+
+[Install]
+WantedBy=multi-user.target
