@@ -1851,34 +1851,37 @@ def _decode_jwt_expiry(token: str):
         return None, None
 
 
-async def _bakong_show_token_info(chat_id: int):
-    token = BAKONG_API_TOKEN
+def _days_status(days_left) -> str:
+    """Return a status string based on days remaining."""
+    if days_left is None:
+        return "✅ Active"
+    if days_left < 0:
+        return f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
+    if days_left == 0:
+        return "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
+    if days_left <= 7:
+        return f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
+    return f"✅ នៅសល់ {days_left} ថ្ងៃ"
 
-    # Fetch Dropmail info in parallel with local JWT decode
+
+async def _send_combined_token_info(chat_id: int, reply_markup) -> None:
+    """Build and send the combined Bakong + Dropmail token info message."""
+    # Kick off Dropmail API call immediately (runs in thread pool)
     dropmail_task = asyncio.create_task(run_sync(_dropmail_check_token_info)) if DROPMAIL_API_TOKEN else None
 
     lines = ["🔑 <b>Token Info</b>\n"]
 
     # ── Bakong API Token ──────────────────────────────────────────────────────
     lines.append("━━━ 🏦 Bakong ━━━")
+    token = BAKONG_API_TOKEN
     if not token:
         lines.append("❌ មិនទាន់មាន Bakong Token ទេ។")
     else:
-        masked = token[:10] + "…"
         exp_dt, days_left = _decode_jwt_expiry(token)
-        lines.append(f"Token: <code>{html.escape(masked)}</code>")
+        lines.append(f"Token: <code>{html.escape(token[:10])}…</code>")
         if exp_dt:
-            exp_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
-            if days_left < 0:
-                bk_status = f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
-            elif days_left == 0:
-                bk_status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
-            elif days_left <= 7:
-                bk_status = f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
-            else:
-                bk_status = f"✅ នៅសល់ {days_left} ថ្ងៃ"
-            lines.append(f"📅 Expire: <b>{exp_str}</b>")
-            lines.append(f"⏳ ស្ថានភាព: {bk_status}")
+            lines.append(f"📅 Expire: <b>{exp_dt.strftime('%Y-%m-%d %H:%M UTC')}</b>")
+            lines.append(f"⏳ ស្ថានភាព: {_days_status(days_left)}")
         else:
             lines.append("📅 Expire: <b>មិនអាចបំបែក JWT បាន</b>")
 
@@ -1895,33 +1898,26 @@ async def _bakong_show_token_info(chat_id: int):
             err_part = f" — <code>{html.escape(err[:60])}</code>" if err else ""
             lines.append(f"⏳ ស្ថានភាព: ❌ មិនត្រឹមត្រូវ{err_part}")
         else:
-            expires_val = info.get("expires") or "N/A"
+            expires_val   = info.get("expires") or "N/A"
             remaining_val = info.get("remaining")
-            dm_days = None
-            exp_display = expires_val
+            dm_days, exp_display = None, expires_val
             if expires_val and expires_val != "N/A":
                 try:
                     exp_dt2 = datetime.fromisoformat(expires_val.replace("Z", "+00:00"))
-                    dm_days = (exp_dt2 - datetime.now(tz=timezone.utc)).days
+                    dm_days     = (exp_dt2 - datetime.now(tz=timezone.utc)).days
                     exp_display = exp_dt2.strftime("%Y-%m-%d %H:%M UTC")
                 except Exception:
                     pass
-            if dm_days is None:
-                dm_status = "✅ Active"
-            elif dm_days < 0:
-                dm_status = f"❌ ផុតកំណត់រួចហើយ ({abs(dm_days)} ថ្ងៃមុន)"
-            elif dm_days == 0:
-                dm_status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
-            elif dm_days <= 7:
-                dm_status = f"⚠️ នឹងផុតក្នុង {dm_days} ថ្ងៃ"
-            else:
-                dm_status = f"✅ នៅសល់ {dm_days} ថ្ងៃ"
             lines.append(f"📅 Expire: <b>{exp_display}</b>")
-            lines.append(f"⏳ ស្ថានភាព: {dm_status}")
+            lines.append(f"⏳ ស្ថានភាព: {_days_status(dm_days)}")
             if remaining_val is not None:
                 lines.append(f"📊 Requests remaining: <b>{remaining_val}</b>")
 
-    await send_msg(chat_id, "\n".join(lines), reply_markup=BAKONG_SUBMENU_KB)
+    await send_msg(chat_id, "\n".join(lines), reply_markup=reply_markup)
+
+
+async def _bakong_show_token_info(chat_id: int):
+    await _send_combined_token_info(chat_id, BAKONG_SUBMENU_KB)
 
 
 async def _show_maintenance_inline(chat_id):
@@ -2685,69 +2681,7 @@ async def _email_handle_list(chat_id: int, user_id: int):
 
 
 async def _email_show_token_info(chat_id: int):
-    if not DROPMAIL_API_TOKEN:
-        await send_msg(
-            chat_id,
-            "❌ <b>Dropmail Token</b> មិនទាន់កំណត់ទេ។\n"
-            "ចុច <b>✏️ ប្តូរ Dropmail Token</b> ដើម្បីកំណត់ token ។",
-            reply_markup=EMAIL_SUBMENU_KB)
-        return
-    masked = DROPMAIL_API_TOKEN[:6] + "…" + DROPMAIL_API_TOKEN[-4:]
-    await send_msg(chat_id, "⏳ កំពុងពិនិត្យ token…", reply_markup=EMAIL_SUBMENU_KB)
-    info = await run_sync(_dropmail_check_token_info)
-
-    if not info.get("valid"):
-        err = info.get("error", "")
-        err_line = f"\n⚠️ <code>{html.escape(err[:80])}</code>" if err else ""
-        text = (
-            f"🔑 <b>Dropmail Token Info</b>\n\n"
-            f"Token: <code>{html.escape(masked)}</code>\n"
-            f"⏳ ស្ថានភាព: ❌ មិនត្រឹមត្រូវ / Error"
-            f"{err_line}"
-        )
-        await send_msg(chat_id, text, reply_markup=EMAIL_SUBMENU_KB)
-        return
-
-    expires_val   = info.get("expires") or "N/A"
-    remaining_val = info.get("remaining")
-
-    # Parse expiry to compute days remaining
-    days_left  = None
-    exp_display = expires_val
-    if expires_val and expires_val != "N/A":
-        try:
-            exp_dt = datetime.fromisoformat(expires_val.replace("Z", "+00:00"))
-            days_left   = (exp_dt - datetime.now(tz=timezone.utc)).days
-            exp_display = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
-        except Exception:
-            pass
-
-    if days_left is None:
-        status = "✅ Active"
-        expire_line = f"\n📅 Expire: <b>{html.escape(str(exp_display))}</b>"
-    elif days_left < 0:
-        status = f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
-        expire_line = f"\n📅 Expire: <b>{exp_display}</b>"
-    elif days_left == 0:
-        status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
-        expire_line = f"\n📅 Expire: <b>{exp_display}</b>"
-    elif days_left <= 7:
-        status = f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
-        expire_line = f"\n📅 Expire: <b>{exp_display}</b>"
-    else:
-        status = f"✅ Active — នៅសល់ {days_left} ថ្ងៃ"
-        expire_line = f"\n📅 Expire: <b>{exp_display}</b>"
-
-    remaining_line = f"\n📊 Requests remaining: <b>{remaining_val}</b>" if remaining_val is not None else ""
-
-    text = (
-        f"🔑 <b>Dropmail Token Info</b>\n\n"
-        f"Token: <code>{html.escape(masked)}</code>\n"
-        f"⏳ ស្ថានភាព: {status}"
-        f"{expire_line}"
-        f"{remaining_line}"
-    )
-    await send_msg(chat_id, text, reply_markup=EMAIL_SUBMENU_KB)
+    await _send_combined_token_info(chat_id, EMAIL_SUBMENU_KB)
 
 
 async def _email_handle_delete_picker(chat_id: int, user_id: int):
