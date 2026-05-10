@@ -1029,6 +1029,7 @@ BTN_BROADCAST         = "📢 ផ្សាយព័ត៌មាន"
 BTN_BACK_SETTINGS     = "↩️ ត្រឡប់ទៅកំណត់"
 BTN_PAYMENT_EDIT      = "✏️ ប្តូរឈ្មោះ Payment"
 BTN_BAKONG_API_EDIT   = "✏️ ប្តូរ Bakong Token"
+BTN_BAKONG_TOKEN_INFO = "📅 ព័ត៌មាន Token"
 BTN_CHANNEL_EDIT      = "✏️ ប្តូរ Channel ID"
 BTN_CHANNEL_CLEAR     = "🗑 លុប Channel ID"
 BTN_ADMIN_ADD         = "➕ បន្ថែម Admin"
@@ -1055,7 +1056,7 @@ BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 ADMIN_BUTTON_LABELS = {
     BTN_ADD_ACCOUNT, BTN_DELETE_TYPE, BTN_STOCK, BTN_USERS, BTN_BUYERS,
     BTN_PAYMENT, BTN_BAKONG, BTN_CHANNEL, BTN_ADMINS, BTN_MAINTENANCE, BTN_BROADCAST,
-    BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_API_EDIT,
+    BTN_BACK_SETTINGS, BTN_PAYMENT_EDIT, BTN_BAKONG_API_EDIT, BTN_BAKONG_TOKEN_INFO,
     BTN_CHANNEL_EDIT, BTN_CHANNEL_CLEAR, BTN_ADMIN_ADD, BTN_ADMIN_REMOVE,
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
@@ -1090,7 +1091,7 @@ PAYMENT_SUBMENU_KB = ReplyKeyboardMarkup(
     resize_keyboard=True, is_persistent=True)
 
 BAKONG_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_BAKONG_API_EDIT)],
+    [KeyboardButton(BTN_BAKONG_API_EDIT), KeyboardButton(BTN_BAKONG_TOKEN_INFO)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
@@ -1828,6 +1829,66 @@ async def _show_bakong_inline(chat_id):
         reply_markup=BAKONG_SUBMENU_KB)
 
 
+def _decode_jwt_expiry(token: str):
+    """Decode a JWT token and return (exp_dt, days_left) or (None, None) on failure."""
+    import base64
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None, None
+        payload_b64 = parts[1]
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+        exp = payload.get("exp")
+        if not exp:
+            return None, None
+        exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+        days_left = (exp_dt - datetime.now(tz=timezone.utc)).days
+        return exp_dt, days_left
+    except Exception:
+        return None, None
+
+
+async def _bakong_show_token_info(chat_id: int):
+    token = BAKONG_API_TOKEN
+    relay = BAKONG_RELAY_TOKEN
+
+    lines = ["🔑 <b>Bakong Token Info</b>\n"]
+
+    for label, tok in [("Bakong API Token", token), ("Bakong Relay Token", relay)]:
+        if not tok:
+            continue
+        masked = tok[:10] + "…"
+        is_relay = tok.startswith("rbk")
+        if is_relay:
+            lines.append(f"<b>{label}:</b> <code>{html.escape(masked)}</code>")
+            lines.append("📋 ប្រភេទ: Relay Token (មិនមាន expiry)\n")
+        else:
+            exp_dt, days_left = _decode_jwt_expiry(tok)
+            lines.append(f"<b>{label}:</b> <code>{html.escape(masked)}</code>")
+            if exp_dt:
+                exp_str = exp_dt.strftime("%Y-%m-%d %H:%M UTC")
+                if days_left < 0:
+                    status = f"❌ ផុតកំណត់រួចហើយ ({abs(days_left)} ថ្ងៃមុន)"
+                elif days_left == 0:
+                    status = "⚠️ ផុតកំណត់ថ្ងៃនេះ!"
+                elif days_left <= 7:
+                    status = f"⚠️ នឹងផុតក្នុង {days_left} ថ្ងៃ"
+                else:
+                    status = f"✅ នៅសល់ {days_left} ថ្ងៃ"
+                lines.append(f"📅 Expire: <b>{exp_str}</b>")
+                lines.append(f"⏳ ស្ថានភាព: {status}\n")
+            else:
+                lines.append("📅 Expire: <b>មិនអាចបំបែក JWT បាន</b>\n")
+
+    if not token and not relay:
+        lines.append("❌ មិនទាន់មាន Token ទេ។")
+
+    await send_msg(chat_id, "\n".join(lines), reply_markup=BAKONG_SUBMENU_KB)
+
+
 async def _show_maintenance_inline(chat_id):
     status = "🔴 បិទ" if MAINTENANCE_MODE else "🟢 បើក"
     await send_msg(chat_id, f"🛠 <b>ស្ថានភាព Bot បច្ចុប្បន្ន៖</b> {status}",
@@ -1864,6 +1925,8 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
             await _show_payment_inline(chat_id)
         elif btn == BTN_BAKONG:
             await _show_bakong_inline(chat_id)
+        elif btn == BTN_BAKONG_TOKEN_INFO:
+            await _bakong_show_token_info(chat_id)
         elif btn == BTN_CHANNEL:
             await _show_channel_inline(chat_id)
         elif btn == BTN_ADMINS:
