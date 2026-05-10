@@ -65,14 +65,11 @@ When deploying this code to a new VPS or any other environment:
 
 - **Do NOT copy** `bot_session.session` — it is tied to the machine/environment it was created on and will cause a `USER_DEACTIVATED` or auth error if moved.
 - **Delete** any existing `bot_session.session` file before starting the bot on the new server. Pyrogram will create a fresh one automatically.
-- **Re-enter all secrets** as environment variables on the VPS (`.env` file or export commands):
+- **Only 2 environment variables are required** on the VPS (`.env` file or export commands):
   - `TELEGRAM_BOT_TOKEN`
-  - `TELEGRAM_API_ID`
-  - `TELEGRAM_API_HASH`
-  - `BAKONG_TOKEN`
   - `NEON_DATABASE_URL`
-  - `DROPMAIL_API_TOKEN`
-- **Database data is preserved** — since the bot uses Neon Postgres (cloud), all accounts, purchase history, and settings remain intact across environments. Only the session file and secrets need to be set up fresh.
+- **Everything else is stored inside the bot's DB settings** — `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `BAKONG_TOKEN`, and `DROPMAIL_API_TOKEN` are all managed via the admin panel (⚙️ Settings → 🔐 Telegram API / 🔑 Bakong Token / 📧 Email). The bot loads them automatically from the database on startup.
+- **Database data is preserved** — since the bot uses Neon Postgres (cloud), all accounts, purchase history, settings, and credentials remain intact across environments. Only 2 env vars need to be set on the new server.
 
 ## Admin-Managed Settings (persisted in `bot_settings` DB table)
 | Key | Description |
