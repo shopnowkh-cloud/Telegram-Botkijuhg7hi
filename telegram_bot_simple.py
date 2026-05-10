@@ -2022,8 +2022,6 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
         asyncio.create_task(run_sync(_save_sessions))
         if raw == BTN_BACK_SETTINGS:
             await send_admin_settings_menu(chat_id)
-        else:
-            await send_msg(chat_id, "🚫 បានបោះបង់ការកំណត់", reply_markup=_main_kb(user_id))
         return True
 
     if key == "payment":
