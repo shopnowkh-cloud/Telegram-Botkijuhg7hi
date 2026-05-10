@@ -2020,8 +2020,7 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
         async with _data_lock:
             user_sessions.pop(user_id, None)
         asyncio.create_task(run_sync(_save_sessions))
-        if raw == BTN_BACK_SETTINGS:
-            await send_admin_settings_menu(chat_id)
+        await send_admin_settings_menu(chat_id)
         return True
 
     if key == "payment":
