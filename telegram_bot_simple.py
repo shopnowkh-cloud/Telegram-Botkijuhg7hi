@@ -2779,10 +2779,14 @@ async def on_admin_session_message(client, message):
                 async with _data_lock:
                     sess["accounts"] = new_accounts
                     sess["state"]    = "waiting_for_account_type"
+                    existing_types = list(accounts_data.get("account_types", {}).keys())
                 asyncio.create_task(run_sync(_save_sessions))
+                type_rows = [[KeyboardButton(t)] for t in existing_types]
+                type_rows.append([KeyboardButton(BTN_BACK_SETTINGS)])
+                type_kb = ReplyKeyboardMarkup(type_rows, resize_keyboard=True, is_persistent=True)
                 await send_msg(chat_id,
-                               f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមបញ្ចូលប្រភេទ គូប៉ុង៖*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               f"*បានបញ្ចូល គូប៉ុង ចំនួន {len(new_accounts)}\n\nសូមជ្រើសរើស ឬបញ្ចូលប្រភេទ គូប៉ុង៖*",
+                               parse_mode=ParseMode.MARKDOWN, reply_markup=type_kb)
             elif accounts:
                 all_d = intra_dupes + stock_dupes
                 await send_msg(chat_id,
