@@ -2789,8 +2789,8 @@ async def on_admin_session_message(client, message):
             elif accounts:
                 all_d = intra_dupes + stock_dupes
                 await send_msg(chat_id,
-                               "*មិនអាចបញ្ចូលបាន*",
-                               parse_mode=ParseMode.MARKDOWN, reply_markup=ADD_ACCOUNT_KB)
+                               "<b>មិនអាចបញ្ចូលបាន</b>",
+                               reply_markup=ADD_ACCOUNT_KB)
             else:
                 await send_msg(chat_id,
                                "<b>អ៊ីមែលមិនត្រឹមត្រូវតាមទម្រង់</b>",
