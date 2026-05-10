@@ -1027,7 +1027,7 @@ BTN_CHANNEL           = "📢 Channel ID"
 BTN_ADMINS            = "👑 គ្រប់គ្រង Admin"
 BTN_MAINTENANCE       = "🛠 Maintenance Mode"
 BTN_BROADCAST         = "📢 ផ្សាយព័ត៌មាន"
-BTN_BACK_SETTINGS     = "↩️ ត្រឡប់ទៅកំណត់"
+BTN_BACK_SETTINGS     = "⬅️ ត្រឡប់ទៅកំណត់"
 BTN_PAYMENT_EDIT      = "✏️ ប្តូរឈ្មោះ Payment"
 BTN_BAKONG_API_EDIT   = "✏️ ប្តូរ Bakong Token"
 BTN_BAKONG_TOKEN_INFO = "📅 ព័ត៌មាន Token"
@@ -1664,7 +1664,7 @@ async def _show_users_list_inline(chat_id):
     fname = f"users_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
     await send_document(chat_id, "\n".join(lines).encode("utf-8"), fname,
                         caption=f"👥 បញ្ជីអ្នកប្រើប្រាស់ — {total} នាក់")
-    await send_msg(chat_id, "↩️ ជ្រើសរើសខាងក្រោម៖", reply_markup=BACK_SETTINGS_KB)
+    await send_msg(chat_id, "⬅️ ជ្រើសរើសខាងក្រោម៖", reply_markup=BACK_SETTINGS_KB)
 
 
 async def _show_delete_type_menu_inline(chat_id, user_id):
