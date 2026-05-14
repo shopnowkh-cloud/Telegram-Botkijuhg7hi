@@ -128,7 +128,8 @@ BAKONG_TOKEN       = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TO
 khqr_client        = KHQR(BAKONG_TOKEN) if BAKONG_TOKEN else None
 
 TTS_ENABLED        = False
-TTS_CLONE_URL      = "https://github.com/limsovannrady/Jdudhsie82"
+TTS_BOT_TOKEN      = ""
+_tts_bot_app       = None
 
 DROPMAIL_API_TOKEN    = os.environ.get("DROPMAIL_API_TOKEN", "")
 DROPMAIL_TOKEN_EXPIRY = ""
@@ -142,55 +143,115 @@ def is_admin(uid) -> bool:
         return False
 
 
-# ── 3b. TTS Engine (edge-tts + language detection) ───────────────────────────
+# ── 3b. TTS Engine — 100% identical to github.com/limsovannrady/Jdudhsie82 ────
 _TTS_MALE_VOICES = {
-    "km": "km-KH-PisethNeural", "en": "en-US-AndrewMultilingualNeural",
-    "zh-CN": "zh-CN-YunyangNeural", "zh-TW": "zh-TW-YunJheNeural",
-    "ja": "ja-JP-KeitaNeural", "ko": "ko-KR-HyunsuMultilingualNeural",
-    "th": "th-TH-NiwatNeural", "vi": "vi-VN-NamMinhNeural",
-    "fr": "fr-FR-RemyMultilingualNeural", "de": "de-DE-FlorianMultilingualNeural",
-    "ar": "ar-SA-HamedNeural", "hi": "hi-IN-MadhurNeural",
-    "ru": "ru-RU-DmitryNeural", "es": "es-ES-AlvaroNeural",
-    "pt": "pt-BR-AntonioNeural", "id": "id-ID-ArdiNeural",
-    "ms": "ms-MY-OsmanNeural", "lo": "lo-LA-ChanthavongNeural",
-    "my": "my-MM-ThihaNeural", "fa": "fa-IR-FaridNeural",
-    "tr": "tr-TR-AhmetNeural", "uk": "uk-UA-OstapNeural",
-    "bn": "bn-BD-PradeepNeural", "ta": "ta-IN-ValluvarNeural",
+    "af":"af-ZA-WillemNeural","am":"am-ET-AmehaNeural","ar":"ar-SA-HamedNeural",
+    "az":"az-AZ-BabekNeural","bg":"bg-BG-BorislavNeural","bn":"bn-BD-PradeepNeural",
+    "bs":"bs-BA-GoranNeural","ca":"ca-ES-EnricNeural","cs":"cs-CZ-AntoninNeural",
+    "cy":"cy-GB-AledNeural","da":"da-DK-JeppeNeural","de":"de-DE-FlorianMultilingualNeural",
+    "el":"el-GR-NestorasNeural","en":"en-US-AndrewMultilingualNeural","es":"es-ES-AlvaroNeural",
+    "et":"et-EE-KertNeural","fa":"fa-IR-FaridNeural","fi":"fi-FI-HarriNeural",
+    "fil":"fil-PH-AngeloNeural","fr":"fr-FR-RemyMultilingualNeural","ga":"ga-IE-ColmNeural",
+    "gl":"gl-ES-RoiNeural","gu":"gu-IN-NiranjanNeural","he":"he-IL-AvriNeural",
+    "hi":"hi-IN-MadhurNeural","hr":"hr-HR-SreckoNeural","hu":"hu-HU-TamasNeural",
+    "id":"id-ID-ArdiNeural","is":"is-IS-GunnarNeural","it":"it-IT-GiuseppeMultilingualNeural",
+    "ja":"ja-JP-KeitaNeural","jv":"jv-ID-DimasNeural","ka":"ka-GE-GiorgiNeural",
+    "kk":"kk-KZ-DauletNeural","km":"km-KH-PisethNeural","kn":"kn-IN-GaganNeural",
+    "ko":"ko-KR-HyunsuMultilingualNeural","lo":"lo-LA-ChanthavongNeural","lt":"lt-LT-LeonasNeural",
+    "lv":"lv-LV-NilsNeural","mk":"mk-MK-AleksandarNeural","ml":"ml-IN-MidhunNeural",
+    "mn":"mn-MN-BataaNeural","mr":"mr-IN-ManoharNeural","ms":"ms-MY-OsmanNeural",
+    "mt":"mt-MT-JosephNeural","my":"my-MM-ThihaNeural","nb":"nb-NO-FinnNeural",
+    "ne":"ne-NP-SagarNeural","nl":"nl-NL-MaartenNeural","pl":"pl-PL-MarekNeural",
+    "ps":"ps-AF-GulNawazNeural","pt":"pt-BR-AntonioNeural","ro":"ro-RO-EmilNeural",
+    "ru":"ru-RU-DmitryNeural","si":"si-LK-SameeraNeural","sk":"sk-SK-LukasNeural",
+    "sl":"sl-SI-RokNeural","so":"so-SO-MuuseNeural","sq":"sq-AL-IlirNeural",
+    "sr":"sr-RS-NicholasNeural","su":"su-ID-JajangNeural","sv":"sv-SE-MattiasNeural",
+    "sw":"sw-KE-RafikiNeural","ta":"ta-IN-ValluvarNeural","te":"te-IN-MohanNeural",
+    "th":"th-TH-NiwatNeural","tr":"tr-TR-AhmetNeural","uk":"uk-UA-OstapNeural",
+    "ur":"ur-IN-SalmanNeural","uz":"uz-UZ-SardorNeural","vi":"vi-VN-NamMinhNeural",
+    "zh-CN":"zh-CN-YunyangNeural","zh-TW":"zh-TW-YunJheNeural","zu":"zu-ZA-ThembaNeural",
 }
 _TTS_FEMALE_VOICES = {
-    "km": "km-KH-SreymomNeural", "en": "en-US-AvaMultilingualNeural",
-    "zh-CN": "zh-CN-XiaoxiaoNeural", "zh-TW": "zh-TW-HsiaoChenNeural",
-    "ja": "ja-JP-NanamiNeural", "ko": "ko-KR-SunHiNeural",
-    "th": "th-TH-PremwadeeNeural", "vi": "vi-VN-HoaiMyNeural",
-    "fr": "fr-FR-VivienneMultilingualNeural", "de": "de-DE-SeraphinaMultilingualNeural",
-    "ar": "ar-SA-ZariyahNeural", "hi": "hi-IN-SwaraNeural",
-    "ru": "ru-RU-SvetlanaNeural", "es": "es-ES-XimenaNeural",
-    "pt": "pt-BR-ThalitaMultilingualNeural", "id": "id-ID-GadisNeural",
-    "ms": "ms-MY-YasminNeural", "lo": "lo-LA-KeomanyNeural",
-    "my": "my-MM-NilarNeural", "fa": "fa-IR-DilaraNeural",
-    "tr": "tr-TR-EmelNeural", "uk": "uk-UA-PolinaNeural",
-    "bn": "bn-BD-NabanitaNeural", "ta": "ta-IN-PallaviNeural",
+    "af":"af-ZA-AdriNeural","am":"am-ET-MekdesNeural","ar":"ar-SA-ZariyahNeural",
+    "az":"az-AZ-BanuNeural","bg":"bg-BG-KalinaNeural","bn":"bn-BD-NabanitaNeural",
+    "bs":"bs-BA-VesnaNeural","ca":"ca-ES-JoanaNeural","cs":"cs-CZ-VlastaNeural",
+    "cy":"cy-GB-NiaNeural","da":"da-DK-ChristelNeural","de":"de-DE-SeraphinaMultilingualNeural",
+    "el":"el-GR-AthinaNeural","en":"en-US-AvaMultilingualNeural","es":"es-ES-XimenaNeural",
+    "et":"et-EE-AnuNeural","fa":"fa-IR-DilaraNeural","fi":"fi-FI-NooraNeural",
+    "fil":"fil-PH-BlessicaNeural","fr":"fr-FR-VivienneMultilingualNeural","ga":"ga-IE-OrlaNeural",
+    "gl":"gl-ES-SabelaNeural","gu":"gu-IN-DhwaniNeural","he":"he-IL-HilaNeural",
+    "hi":"hi-IN-SwaraNeural","hr":"hr-HR-GabrijelaNeural","hu":"hu-HU-NoemiNeural",
+    "id":"id-ID-GadisNeural","is":"is-IS-GudrunNeural","it":"it-IT-IsabellaNeural",
+    "ja":"ja-JP-NanamiNeural","jv":"jv-ID-SitiNeural","ka":"ka-GE-EkaNeural",
+    "kk":"kk-KZ-AigulNeural","km":"km-KH-SreymomNeural","kn":"kn-IN-SapnaNeural",
+    "ko":"ko-KR-SunHiNeural","lo":"lo-LA-KeomanyNeural","lt":"lt-LT-OnaNeural",
+    "lv":"lv-LV-EveritaNeural","mk":"mk-MK-MarijaNeural","ml":"ml-IN-SobhanaNeural",
+    "mn":"mn-MN-YesuiNeural","mr":"mr-IN-AarohiNeural","ms":"ms-MY-YasminNeural",
+    "mt":"mt-MT-GraceNeural","my":"my-MM-NilarNeural","nb":"nb-NO-PernilleNeural",
+    "ne":"ne-NP-HemkalaNeural","nl":"nl-NL-ColetteNeural","pl":"pl-PL-ZofiaNeural",
+    "ps":"ps-AF-LatifaNeural","pt":"pt-BR-ThalitaMultilingualNeural","ro":"ro-RO-AlinaNeural",
+    "ru":"ru-RU-SvetlanaNeural","si":"si-LK-ThiliniNeural","sk":"sk-SK-ViktoriaNeural",
+    "sl":"sl-SI-PetraNeural","so":"so-SO-UbaxNeural","sq":"sq-AL-AnilaNeural",
+    "sr":"sr-RS-SophieNeural","su":"su-ID-TutiNeural","sv":"sv-SE-SofieNeural",
+    "sw":"sw-KE-ZuriNeural","ta":"ta-IN-PallaviNeural","te":"te-IN-ShrutiNeural",
+    "th":"th-TH-PremwadeeNeural","tr":"tr-TR-EmelNeural","uk":"uk-UA-PolinaNeural",
+    "ur":"ur-IN-GulNeural","uz":"uz-UZ-MadinaNeural","vi":"vi-VN-HoaiMyNeural",
+    "zh-CN":"zh-CN-XiaoxiaoNeural","zh-TW":"zh-TW-HsiaoChenNeural","zu":"zu-ZA-ThandoNeural",
 }
+_TTS_NORMALIZE = {
+    "zh-cn":"zh-CN","zh-tw":"zh-TW","zh":"zh-CN",
+    "iw":"he","no":"nb","tl":"fil","jw":"jv","in":"id",
+}
+_TTS_LANG_FALLBACK = {"pa":"hi","or":"bn","hy":"en"}
 _TTS_SCRIPT_MAP = [
-    (r'[\u1780-\u17FF]', 'km'), (r'[\u0E00-\u0E7F]', 'th'),
-    (r'[\u0E80-\u0EFF]', 'lo'), (r'[\u1000-\u109F]', 'my'),
-    (r'[\u0590-\u05FF]', 'he'), (r'[\u0900-\u097F]', 'hi'),
-    (r'[\u0980-\u09FF]', 'bn'), (r'[\u0B80-\u0BFF]', 'ta'),
-    (r'[\u0C00-\u0C7F]', 'te'), (r'[\u0D00-\u0D7F]', 'ml'),
-    (r'[\u0600-\u06FF]', 'ar'), (r'[\u0400-\u04FF]', 'ru'),
-    (r'[\u0370-\u03FF]', 'el'), (r'[\uAC00-\uD7FF]', 'ko'),
-    (r'[\u3040-\u30FF]', 'ja'), (r'[\u4E00-\u9FFF\u3400-\u4DBF]', 'zh-CN'),
+    (r'[\u1780-\u17FF]','km'),(r'[\u0E00-\u0E7F]','th'),(r'[\u0E80-\u0EFF]','lo'),
+    (r'[\u1000-\u109F]','my'),(r'[\u1200-\u137F]','am'),(r'[\u10A0-\u10FF]','ka'),
+    (r'[\u0530-\u058F]','hy'),(r'[\u0590-\u05FF]','he'),(r'[\u0900-\u097F]','hi'),
+    (r'[\u0980-\u09FF]','bn'),(r'[\u0A00-\u0A7F]','pa'),(r'[\u0A80-\u0AFF]','gu'),
+    (r'[\u0B00-\u0B7F]','or'),(r'[\u0B80-\u0BFF]','ta'),(r'[\u0C00-\u0C7F]','te'),
+    (r'[\u0C80-\u0CFF]','kn'),(r'[\u0D00-\u0D7F]','ml'),(r'[\u0D80-\u0DFF]','si'),
+    (r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]','ar'),
+    (r'[\u0400-\u04FF]','ru'),(r'[\u0370-\u03FF]','el'),(r'[\u1800-\u18AF]','mn'),
+    (r'[\uAC00-\uD7FF]','ko'),(r'[\u3040-\u30FF]','ja'),
+    (r'[\u4E00-\u9FFF\u3400-\u4DBF]','zh-CN'),
 ]
+_TTS_SEGMENT_RE = re.compile(
+    r'(?P<km>[\u1780-\u17FF]+)|(?P<th>[\u0E00-\u0E7F]+)|(?P<lo>[\u0E80-\u0EFF]+)'
+    r'|(?P<my>[\u1000-\u109F]+)|(?P<am>[\u1200-\u137F]+)|(?P<ka>[\u10A0-\u10FF]+)'
+    r'|(?P<he>[\u0590-\u05FF]+)|(?P<hi>[\u0900-\u097F]+)|(?P<bn>[\u0980-\u09FF]+)'
+    r'|(?P<pa>[\u0A00-\u0A7F]+)|(?P<gu>[\u0A80-\u0AFF]+)|(?P<ta>[\u0B80-\u0BFF]+)'
+    r'|(?P<te>[\u0C00-\u0C7F]+)|(?P<kn>[\u0C80-\u0CFF]+)|(?P<ml>[\u0D00-\u0D7F]+)'
+    r'|(?P<si>[\u0D80-\u0DFF]+)'
+    r'|(?P<ar>[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+)'
+    r'|(?P<ru>[\u0400-\u04FF]+)|(?P<el>[\u0370-\u03FF]+)|(?P<mn_s>[\u1800-\u18AF]+)'
+    r'|(?P<ko>[\uAC00-\uD7FF]+)|(?P<ja>[\u3040-\u30FF]+)'
+    r'|(?P<zh>[\u4E00-\u9FFF\u3400-\u4DBF]+)'
+    r'|(?P<other>[^\u1780-\u17FF\u0E00-\u0EFF\u1000-\u109F\u1200-\u137F'
+    r'\u10A0-\u10FF\u0590-\u05FF\u0900-\u09FF\u0A00-\u0AFF\u0B80-\u0BFF'
+    r'\u0C00-\u0CFF\u0D00-\u0DFF\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF'
+    r'\uFE70-\uFEFF\u0400-\u04FF\u0370-\u03FF\u1800-\u18AF\uAC00-\uD7FF'
+    r'\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]+)'
+)
+_TTS_SCRIPT_LANG = {
+    'km':'km','th':'th','lo':'lo','my':'my','am':'am','ka':'ka','he':'he','hi':'hi',
+    'bn':'bn','pa':'hi','gu':'gu','ta':'ta','te':'te','kn':'kn','ml':'ml','si':'si',
+    'ar':'ar','ru':'ru','el':'el','mn_s':'mn','ko':'ko','ja':'ja','zh':'zh-CN',
+}
 _TTS_FILE_CACHE: "OrderedDict[str, str]" = OrderedDict()
-_TTS_CACHE_MAX = 150
+_TTS_CACHE_MAX = 200
+_TTS_USER_GENDER: dict = {}
+_TTS_USER_SPEED: dict  = {}
+_TTS_SPEED_RATES  = {"x0.5":"-50%","x1":"+0%","x1.5":"+50%","x2":"+100%"}
+_TTS_SPEED_LABELS = {"x0.5":"🐢 ល្បឿន x0.5","x1":"▶️ ល្បឿន x1","x1.5":"⚡ ល្បឿន x1.5","x2":"🚀 ល្បឿន x2"}
+_TTS_SPEED_EMOJI  = {"x0.5":"🐢","x1":"▶️","x1.5":"⚡","x2":"🚀"}
 
-def _tts_cache_get(key: str):
+def _tts_cache_get(key):
     if key in _TTS_FILE_CACHE:
         _TTS_FILE_CACHE.move_to_end(key)
         return _TTS_FILE_CACHE[key]
     return None
 
-def _tts_cache_set(key: str, file_id: str):
+def _tts_cache_set(key, file_id):
     if key in _TTS_FILE_CACHE:
         _TTS_FILE_CACHE.move_to_end(key)
     else:
@@ -198,59 +259,154 @@ def _tts_cache_set(key: str, file_id: str):
             _TTS_FILE_CACHE.popitem(last=False)
         _TTS_FILE_CACHE[key] = file_id
 
-def _tts_strip(text: str) -> str:
+def _tts_strip(text):
     result = []
     for ch in text:
         cat = unicodedata.category(ch)
-        if cat.startswith(('L', 'M', 'N', 'P', 'Z')) or ch in ('\n', '\r', '\t', ' '):
+        if cat.startswith(('L','M','N','P','Z')) or ch in ('\n','\r','\t',' '):
             result.append(ch)
     return ''.join(result)
 
-def _tts_detect_lang(text: str) -> str:
+def _tts_has_speakable(text):
+    return bool(re.search(r'\w', text, re.UNICODE))
+
+def _tts_get_gender(user_id):
+    return _TTS_USER_GENDER.get(user_id, "female")
+
+def _tts_set_gender(user_id, gender):
+    _TTS_USER_GENDER[user_id] = gender
+
+def _tts_get_speed(user_id):
+    s = _TTS_USER_SPEED.get(user_id, "x1")
+    return s if s in _TTS_SPEED_RATES else "x1"
+
+def _tts_set_speed(user_id, speed):
+    _TTS_USER_SPEED[user_id] = speed
+
+def _tts_detect_lang(text):
     for pattern, lang in _TTS_SCRIPT_MAP:
         if re.search(pattern, text):
-            return lang
-    if not _LANGDETECT_AVAILABLE:
-        return 'en'
+            if lang == 'ar' and _LANGDETECT_AVAILABLE:
+                try:
+                    d = _TTS_NORMALIZE.get(_langdetect_detect(text), _langdetect_detect(text))
+                    if d in ('fa','ur','ps','ar'): return d
+                except Exception: pass
+            if lang == 'ru' and _LANGDETECT_AVAILABLE:
+                try:
+                    d = _TTS_NORMALIZE.get(_langdetect_detect(text), _langdetect_detect(text))
+                    if d in ('ru','uk','bg','sr','mk','kk','mn'): return d
+                except Exception: pass
+            return _TTS_LANG_FALLBACK.get(lang, lang)
+    if not _LANGDETECT_AVAILABLE: return 'en'
+    stripped = text.strip()
+    if len(stripped) < 15 or len(stripped.split()) < 3: return 'en'
     try:
         langs = _langdetect_langs(text)
-        if langs and langs[0].prob >= 0.65:
-            return langs[0].lang
-    except Exception:
-        pass
+        if langs and langs[0].prob >= 0.70:
+            code = _TTS_NORMALIZE.get(langs[0].lang, langs[0].lang)
+            return _TTS_LANG_FALLBACK.get(code, code)
+    except Exception: pass
     return 'en'
 
-async def _tts_synth(text: str, voice: str, rate: str = '+0%') -> BytesIO:
+def _tts_segment(text):
+    raw = []
+    for m in _TTS_SEGMENT_RE.finditer(text):
+        g = m.lastgroup
+        chunk = m.group()
+        if g == 'other':
+            raw.append((chunk, None))
+        else:
+            lang = _TTS_SCRIPT_LANG.get(g, 'en')
+            if g == 'ar' and _LANGDETECT_AVAILABLE:
+                try:
+                    d = _TTS_NORMALIZE.get(_langdetect_detect(chunk), _langdetect_detect(chunk))
+                    if d in ('fa','ur','ps','ar'): lang = d
+                except Exception: pass
+            elif g == 'ru' and _LANGDETECT_AVAILABLE:
+                try:
+                    d = _TTS_NORMALIZE.get(_langdetect_detect(chunk), _langdetect_detect(chunk))
+                    if d in ('ru','uk','bg','sr','mk','kk','mn'): lang = d
+                except Exception: pass
+            raw.append((chunk, lang))
+    resolved = []
+    for chunk, lang in raw:
+        if lang is not None:
+            resolved.append((chunk, lang))
+            continue
+        stripped = chunk.strip()
+        if not stripped:
+            if resolved: resolved[-1] = (resolved[-1][0]+chunk, resolved[-1][1])
+            continue
+        has_latin = bool(re.search(r'[a-zA-Z]', chunk))
+        if not has_latin:
+            if resolved: resolved[-1] = (resolved[-1][0]+chunk, resolved[-1][1])
+            else: resolved.append((chunk,'en'))
+            continue
+        detected = 'en'
+        if len(stripped) >= 4 and _LANGDETECT_AVAILABLE:
+            try:
+                langs = _langdetect_langs(stripped)
+                if langs and langs[0].prob >= 0.65:
+                    detected = _TTS_NORMALIZE.get(langs[0].lang, langs[0].lang)
+            except Exception: pass
+        resolved.append((chunk, detected))
+    resolved = [(c, _TTS_LANG_FALLBACK.get(l,l)) for c,l in resolved]
+    merged = []
+    for chunk, lang in resolved:
+        if merged and merged[-1][1] == lang: merged[-1] = (merged[-1][0]+chunk, lang)
+        else: merged.append([chunk, lang])
+    return [(c,l) for c,l in merged] if merged else [('','en')]
+
+def _tts_voice_for(user_id, lang):
+    vm = _TTS_MALE_VOICES if _tts_get_gender(user_id) == "male" else _TTS_FEMALE_VOICES
+    return vm.get(lang) or vm.get('en','en-US-AvaMultilingualNeural')
+
+async def _tts_synth_segment_pcm(text, voice, rate='+0%'):
     clean = _tts_strip(text).strip()
-    if not clean or not re.search(r'\w', clean, re.UNICODE):
-        return BytesIO(b'')
-    mp3_buf = BytesIO()
-    communicate = edge_tts.Communicate(clean, voice, rate=rate)
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            mp3_buf.write(chunk["data"])
-    mp3_buf.seek(0)
+    if not clean or not _tts_has_speakable(clean): return b''
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _FFMPEG_EXE,"-y","-f","mp3","-i","pipe:0",
+            "-ac","1","-ar","48000","-f","s16le","pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        communicate = edge_tts.Communicate(clean, voice, rate=rate, pitch="+5Hz")
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                proc.stdin.write(chunk["data"])
+        proc.stdin.close()
+        stdout, _ = await proc.communicate()
+        return stdout
+    except Exception as e:
+        logger.warning(f"TTS segment error: {e!r} | text={clean[:30]!r}")
+        return b''
+
+async def _tts_pcm_to_ogg(pcm):
     proc = await asyncio.create_subprocess_exec(
-        _FFMPEG_EXE, "-y", "-f", "mp3", "-i", "pipe:0",
-        "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "96k", "-f", "ogg", "pipe:1",
+        _FFMPEG_EXE,"-y","-f","s16le","-ac","1","-ar","48000","-i","pipe:0",
+        "-c:a","libopus","-b:a","128k","-f","ogg","pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    stdout, _ = await proc.communicate(input=mp3_buf.read())
+    stdout, _ = await proc.communicate(input=pcm)
     return BytesIO(stdout)
 
-_TTS_USER_GENDER: dict = {}
-_TTS_USER_SPEED: dict  = {}
-_TTS_SPEED_RATES = {"x0.5": "-50%", "x1": "+0%", "x1.5": "+50%", "x2": "+100%"}
+async def _tts_synth_single(text, voice, rate='+0%'):
+    pcm = await _tts_synth_segment_pcm(text, voice, rate=rate)
+    return await _tts_pcm_to_ogg(pcm)
 
-def _tts_get_voice(user_id: int, lang: str) -> str:
-    gender = _TTS_USER_GENDER.get(user_id, "female")
-    vm = _TTS_MALE_VOICES if gender == "male" else _TTS_FEMALE_VOICES
-    return vm.get(lang) or vm.get("en", "en-US-AvaMultilingualNeural")
-
-def _tts_get_speed(user_id: int) -> str:
-    return _TTS_USER_SPEED.get(user_id, "x1")
+async def _tts_synth_mixed(segments, voice_map, rate='+0%'):
+    tasks = [
+        _tts_synth_segment_pcm(chunk, voice_map.get(lang) or voice_map.get('en'), rate=rate)
+        for chunk, lang in segments
+        if _tts_strip(chunk).strip() and _tts_has_speakable(_tts_strip(chunk))
+    ]
+    if not tasks: return BytesIO(b'')
+    parts = await asyncio.gather(*tasks)
+    return await _tts_pcm_to_ogg(b''.join(parts))
 
 # ── 4. Blocking HTTP session (DB + Bakong, run in thread pool) ────────────────
 _retry = Retry(
@@ -1186,11 +1342,9 @@ BTN_EMAIL_TOKEN_EDIT  = "✏️ ប្តូរ Dropmail Token"
 BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 
 BTN_TTS_MGMT         = "🔊 TTS Bot"
-BTN_TTS_ON           = "🟢 បើក TTS"
-BTN_TTS_OFF          = "🔴 បិទ TTS"
-BTN_TTS_CLONE        = "🔗 Clone TTS Bot"
-BTN_TTS_GENDER_MALE  = "👨 សំឡេងប្រុស (Default)"
-BTN_TTS_GENDER_FEM   = "👩 សំឡេងស្រី (Default)"
+BTN_TTS_TOKEN_EDIT   = "✏️ ដាក់ Bot Token"
+BTN_TTS_BOT_STOP     = "⏹ Stop TTS Bot"
+BTN_TTS_BOT_STATUS   = "📊 TTS Bot Status"
 
 
 
@@ -1202,8 +1356,7 @@ ADMIN_BUTTON_LABELS = {
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
     BTN_EMAIL_TOKEN_EDIT, BTN_EMAIL_TOKEN_INFO,
-    BTN_TTS_MGMT, BTN_TTS_ON, BTN_TTS_OFF, BTN_TTS_CLONE,
-    BTN_TTS_GENDER_MALE, BTN_TTS_GENDER_FEM,
+    BTN_TTS_MGMT, BTN_TTS_TOKEN_EDIT, BTN_TTS_BOT_STOP, BTN_TTS_BOT_STATUS,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -1270,9 +1423,8 @@ EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
 ], resize_keyboard=True, is_persistent=True)
 
 TTS_SUBMENU_KB = ReplyKeyboardMarkup([
-    [KeyboardButton(BTN_TTS_ON),          KeyboardButton(BTN_TTS_OFF)],
-    [KeyboardButton(BTN_TTS_GENDER_FEM),  KeyboardButton(BTN_TTS_GENDER_MALE)],
-    [KeyboardButton(BTN_TTS_CLONE)],
+    [KeyboardButton(BTN_TTS_TOKEN_EDIT)],
+    [KeyboardButton(BTN_TTS_BOT_STATUS), KeyboardButton(BTN_TTS_BOT_STOP)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
@@ -2192,52 +2344,60 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
             await _email_show_token_info(chat_id)
         elif btn == BTN_TTS_MGMT:
             await _show_tts_submenu(chat_id)
-        elif btn == BTN_TTS_ON:
-            await _tts_set_enabled(chat_id, True)
-        elif btn == BTN_TTS_OFF:
-            await _tts_set_enabled(chat_id, False)
-        elif btn == BTN_TTS_CLONE:
-            await send_msg(
-                chat_id,
-                f"🔗 <b>Clone TTS Bot</b>\n\n"
-                f"GitHub Repository:\n<code>{TTS_CLONE_URL}</code>\n\n"
-                f"<i>Copy the link above ☝️ to clone and deploy your own TTS bot.</i>",
-                reply_markup=TTS_SUBMENU_KB)
-        elif btn == BTN_TTS_GENDER_FEM:
-            TTS_ENABLED_DEFAULT_GENDER = "female"
-            await run_sync(_set_setting, "TTS_DEFAULT_GENDER", "female")
-            await send_msg(chat_id, "✅ Default voice set to 👩 Female", reply_markup=TTS_SUBMENU_KB)
-        elif btn == BTN_TTS_GENDER_MALE:
-            TTS_ENABLED_DEFAULT_GENDER = "male"
-            await run_sync(_set_setting, "TTS_DEFAULT_GENDER", "male")
-            await send_msg(chat_id, "✅ Default voice set to 👨 Male", reply_markup=TTS_SUBMENU_KB)
+        elif btn == BTN_TTS_TOKEN_EDIT:
+            await _prompt_admin_input(
+                chat_id, user_id, "tts_bot_token",
+                "🔊 សូមផ្ញើ <b>Telegram Bot Token</b> សម្រាប់ TTS Bot:\n\n"
+                "<i>Token ពី @BotFather — ឧ. <code>123456:ABC-DEF...</code></i>")
+        elif btn == BTN_TTS_BOT_STATUS:
+            await _tts_show_status(chat_id)
+        elif btn == BTN_TTS_BOT_STOP:
+            await _tts_do_stop(chat_id)
     finally:
         _current_client.reset(tok)
 
 
 async def _show_tts_submenu(chat_id):
-    global TTS_ENABLED
-    status = "🟢 ON" if TTS_ENABLED else "🔴 OFF"
-    if not _TTS_AVAILABLE:
-        note = "\n\n⚠️ <i>edge-tts not installed — TTS unavailable.</i>"
-    else:
-        note = ""
+    running = _tts_bot_app is not None
+    token_preview = (TTS_BOT_TOKEN[:10] + "…") if TTS_BOT_TOKEN else "មិនទាន់មាន"
+    status = "🟢 Running" if running else "🔴 Stopped"
+    pkg_note = "" if _TTS_AVAILABLE else "\n\n⚠️ <i>edge-tts មិនទាន់ install — TTS unavailable.</i>"
     await send_msg(
         chat_id,
         f"🔊 <b>TTS Bot Management</b>\n\n"
-        f"Status: <b>{status}</b>{note}\n\n"
-        f"When TTS is <b>ON</b>, all user text messages will receive a voice reply.\n\n"
-        f"🔗 Clone link: <code>{TTS_CLONE_URL}</code>",
+        f"📊 Status: <b>{status}</b>{pkg_note}\n"
+        f"🤖 Token: <code>{html.escape(token_preview)}</code>\n\n"
+        f"ដាក់ Bot Token ដើម្បី start TTS bot ថ្មី។\n"
+        f"TTS bot នឹង <b>ដំណើរការ 100% ដូច GitHub repo</b> — "
+        f"voice toggle, speed control, language auto-detect (70+ languages).",
         reply_markup=TTS_SUBMENU_KB)
 
 
-async def _tts_set_enabled(chat_id, enabled: bool):
-    global TTS_ENABLED
-    TTS_ENABLED = enabled
-    await run_sync(_set_setting, "TTS_ENABLED", "true" if enabled else "false")
-    icon = "🟢" if enabled else "🔴"
-    label = "ON" if enabled else "OFF"
-    await send_msg(chat_id, f"{icon} TTS Bot turned <b>{label}</b>", reply_markup=TTS_SUBMENU_KB)
+async def _tts_show_status(chat_id):
+    running = _tts_bot_app is not None
+    token_preview = (TTS_BOT_TOKEN[:12] + "…") if TTS_BOT_TOKEN else "—"
+    status = "🟢 Running" if running else "🔴 Stopped"
+    await send_msg(
+        chat_id,
+        f"📊 <b>TTS Bot Status</b>\n\n"
+        f"ស្ថានភាព: <b>{status}</b>\n"
+        f"Token: <code>{html.escape(token_preview)}</code>",
+        reply_markup=TTS_SUBMENU_KB)
+
+
+async def _tts_do_stop(chat_id):
+    global _tts_bot_app, TTS_BOT_TOKEN
+    if _tts_bot_app is None:
+        await send_msg(chat_id, "ℹ️ TTS Bot មិនដំណើរការទេ។", reply_markup=TTS_SUBMENU_KB)
+        return
+    try:
+        await _tts_bot_app.updater.stop()
+        await _tts_bot_app.stop()
+        await _tts_bot_app.shutdown()
+    except Exception as e:
+        logger.warning(f"TTS bot stop error: {e}")
+    _tts_bot_app = None
+    await send_msg(chat_id, "⏹ <b>TTS Bot stopped.</b>", reply_markup=TTS_SUBMENU_KB)
 
 
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
@@ -2399,6 +2559,37 @@ async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
             "❓ <b>តើ​អ្នក​ប្រាកដ​ជា​ចង់​ផ្សាយ​សារ​ខាង​លើ​នេះ​ទៅ​អ្នក​ប្រើ​ប្រាស់​ទាំង​អស់​មែន​ទេ?</b>\n\n"
             "ចុច <b>✅ បញ្ជាក់ផ្សាយ</b> ឬ <b>🚫 បោះបង់ការផ្សាយ</b>",
             reply_markup=BROADCAST_CONFIRM_KB)
+        return True
+
+    if key == "tts_bot_token":
+        if not raw:
+            await send_msg(chat_id, "សូមផ្ញើ Telegram Bot Token (ឬចុច 🚫 បោះបង់)")
+            return True
+        if not re.match(r'^\d+:[A-Za-z0-9_\-]{30,}$', raw):
+            await send_msg(
+                chat_id,
+                "❌ Token មិនត្រឹមត្រូវ — ទម្រង់ <code>123456:ABC-DEF...</code>\n\nសូមផ្ញើ Token ត្រឹមត្រូវ ឬចុច 🚫 បោះបង់")
+            return True
+        async with _data_lock:
+            user_sessions.pop(user_id, None)
+        asyncio.create_task(run_sync(_save_sessions))
+        await send_msg(chat_id, "⏳ <b>កំពុង Start TTS Bot…</b>", reply_markup=TTS_SUBMENU_KB)
+        ok = await _launch_tts_bot(raw)
+        if ok:
+            await run_sync(_set_setting, "TTS_BOT_TOKEN", raw)
+            await send_msg(
+                chat_id,
+                "✅ <b>TTS Bot started!</b>\n\nBot ដំណើរការ 100% ដូច GitHub repo —\n"
+                "• ភ្ជាប់ voice auto-detect (70+ languages)\n"
+                "• 👨/👩 Gender toggle ស្ទ្រីអ្នកប្រើ\n"
+                "• 🐢/▶️/⚡/🚀 Speed control x0.5–x2\n"
+                "• 🔔 Notify admin ពី user ថ្មី",
+                reply_markup=TTS_SUBMENU_KB)
+        else:
+            await send_msg(
+                chat_id,
+                "❌ <b>TTS Bot start failed.</b>\n\nToken ប្រហែលជាខុស ឬ Bot API reject — សូម check token ម្ដងទៀត។",
+                reply_markup=TTS_SUBMENU_KB)
         return True
 
     return False
@@ -3132,21 +3323,34 @@ async def _tts_send_voice(client, message):
     if not text:
         return
     try:
-        lang   = _tts_detect_lang(text)
-        voice  = _tts_get_voice(user_id, lang)
-        rate   = _TTS_SPEED_RATES.get(_tts_get_speed(user_id), "+0%")
-        cache_key = f"tts:{voice}:{rate}:{text}"
-        cached = _tts_cache_get(cache_key)
-        if cached:
-            await client.send_voice(chat_id, cached)
-        else:
-            audio_buf = await _tts_synth(text, voice, rate=rate)
-            audio_buf.seek(0)
-            if audio_buf.getbuffer().nbytes < 10:
+        segments = _tts_segment(text)
+        langs    = [l for _, l in segments]
+        unique   = set(langs)
+        gender   = _tts_get_gender(user_id)
+        rate     = _TTS_SPEED_RATES.get(_tts_get_speed(user_id), "+0%")
+        vm       = _TTS_MALE_VOICES if gender == "male" else _TTS_FEMALE_VOICES
+        if len(unique) <= 1:
+            lang  = langs[0] if langs else 'en'
+            voice = vm.get(lang) or vm.get('en', 'en-US-AvaMultilingualNeural')
+            cache_key = f"tts:{voice}:{rate}:{text}"
+            cached = _tts_cache_get(cache_key)
+            if cached:
+                await client.send_voice(chat_id, cached)
                 return
-            sent = await client.send_voice(chat_id, audio_buf)
-            if sent and sent.voice:
-                _tts_cache_set(cache_key, sent.voice.file_id)
+            buf = await _tts_synth_single(text, voice, rate=rate)
+        else:
+            cache_key = f"tts_mix:{gender}:{rate}:{text}"
+            cached = _tts_cache_get(cache_key)
+            if cached:
+                await client.send_voice(chat_id, cached)
+                return
+            buf = await _tts_synth_mixed(segments, vm, rate=rate)
+        buf.seek(0)
+        if buf.getbuffer().nbytes < 10:
+            return
+        sent = await client.send_voice(chat_id, buf)
+        if sent and sent.voice:
+            _tts_cache_set(cache_key, sent.voice.file_id)
     except Exception as e:
         logger.warning(f"TTS voice send failed for user {user_id}: {e}")
 
@@ -3554,12 +3758,198 @@ async def _resume_scheduled_deletions():
         logger.error(f"Failed to resume scheduled deletions: {e}")
 
 
+# ── 19b. Standalone TTS Bot — 100% identical to github.com/limsovannrady/Jdudhsie82 ──
+_TTS_KNOWN_USERS: set = set()
+
+def _tts_build_inline_kb(user_id):
+    gender = _tts_get_gender(user_id)
+    speed  = _tts_get_speed(user_id)
+    g_male = "✅ 👨 ប្រុស" if gender == "male" else "👨 ប្រុស"
+    g_fem  = "✅ 👩 ស្រី"  if gender == "female" else "👩 ស្រី"
+    spd_opts = []
+    for s in ("x0.5","x1","x1.5","x2"):
+        e = _TTS_SPEED_EMOJI[s]
+        label = f"✅ {e}{s}" if s == speed else f"{e}{s}"
+        spd_opts.append({"text": label, "data": f"set_speed:{user_id}:{s}"})
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    row1 = [
+        InlineKeyboardButton(g_fem,  callback_data=f"voice:{user_id}:female"),
+        InlineKeyboardButton(g_male, callback_data=f"voice:{user_id}:male"),
+    ]
+    row2 = [InlineKeyboardButton(o["text"], callback_data=o["data"]) for o in spd_opts[:2]]
+    row3 = [InlineKeyboardButton(o["text"], callback_data=o["data"]) for o in spd_opts[2:]]
+    return InlineKeyboardMarkup([row1, row2, row3])
+
+async def _tts_bot_on_start(update, context):
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    except ImportError: return
+    user = update.effective_user
+    if not user: return
+    uid = user.id
+    is_new = uid not in _TTS_KNOWN_USERS
+    _TTS_KNOWN_USERS.add(uid)
+    if is_new:
+        try:
+            name = (user.first_name or "") + (" " + user.last_name if user.last_name else "")
+            uname = f"@{user.username}" if user.username else "គ្មាន"
+            if _tts_bot_app:
+                bot_info = await _tts_bot_app.bot.get_me()
+                bot_name = bot_info.first_name
+            else:
+                bot_name = "TTS Bot"
+            try:
+                await app.send_message(
+                    ADMIN_ID,
+                    f"🔔 <b>TTS Bot — New User!</b>\n\n"
+                    f"Bot: <b>{html.escape(bot_name)}</b>\n"
+                    f"👤 {html.escape(name.strip())} ({uname})\n"
+                    f"🆔 <code>{uid}</code>")
+            except Exception as e:
+                logger.warning(f"TTS new-user notify error: {e}")
+        except Exception: pass
+    gender = _tts_get_gender(uid)
+    speed  = _tts_get_speed(uid)
+    g_label = "👩 ស្រី" if gender == "female" else "👨 ប្រុស"
+    s_label = _TTS_SPEED_LABELS.get(speed, speed)
+    await update.message.reply_html(
+        f"👋 <b>សូមស្វាគមន៍!</b>\n\n"
+        f"ខ្ញុំ <b>TTS Bot</b> — ផ្ញើ​អត្ថបទ ទទួល​ជា​សំឡេង​ភ្លាម!\n\n"
+        f"🌍 ភាសា: ចាប់ <b>70+ ភាសា</b> ដោយ​ស្វ័យ​ប្រវត្តិ\n"
+        f"🎙 Voice: <b>{g_label}</b>\n"
+        f"⚡ ល្បឿន: <b>{s_label}</b>\n\n"
+        f"ចុចប៊ូតុងខាងក្រោម​ VoiceMessage ដែល​Bot​ផ្ញើ ដើម្បី​ប្ដូរ​ Voice ឬ ល្បឿន 🎛",
+    )
+
+async def _tts_bot_voice_cb(update, context):
+    q = update.callback_query
+    if not q: return
+    await q.answer()
+    parts = (q.data or "").split(":")
+    if len(parts) != 3: return
+    _, uid_str, gender = parts
+    try: uid = int(uid_str)
+    except ValueError: return
+    if q.from_user.id != uid:
+        await q.answer("ប៊ូតុងនេះមិនមែនរបស់អ្នក!", show_alert=True)
+        return
+    _tts_set_gender(uid, gender)
+    try:
+        await q.edit_message_reply_markup(reply_markup=_tts_build_inline_kb(uid))
+    except Exception: pass
+
+async def _tts_bot_speed_set_cb(update, context):
+    q = update.callback_query
+    if not q: return
+    await q.answer()
+    parts = (q.data or "").split(":")
+    if len(parts) != 3: return
+    _, uid_str, speed = parts
+    try: uid = int(uid_str)
+    except ValueError: return
+    if q.from_user.id != uid:
+        await q.answer("ប៊ូតុងនេះមិនមែនរបស់អ្នក!", show_alert=True)
+        return
+    _tts_set_speed(uid, speed)
+    try:
+        await q.edit_message_reply_markup(reply_markup=_tts_build_inline_kb(uid))
+    except Exception: pass
+
+async def _tts_bot_on_message(update, context):
+    msg = update.message
+    if not msg or not msg.text: return
+    user = msg.from_user
+    if not user: return
+    uid   = user.id
+    text  = msg.text.strip()
+    if not text or not _TTS_AVAILABLE: return
+    _TTS_KNOWN_USERS.add(uid)
+    gender = _tts_get_gender(uid)
+    speed  = _tts_get_speed(uid)
+    rate   = _TTS_SPEED_RATES.get(speed, "+0%")
+    try:
+        segments = _tts_segment(text)
+        langs    = [l for _, l in segments]
+        unique   = set(langs)
+        vm       = _TTS_MALE_VOICES if gender == "male" else _TTS_FEMALE_VOICES
+        if len(unique) <= 1:
+            lang  = langs[0] if langs else 'en'
+            voice = vm.get(lang) or vm.get('en', 'en-US-AvaMultilingualNeural')
+            ck    = f"tts_standalone:{voice}:{rate}:{text}"
+            cached = _tts_cache_get(ck)
+            if cached:
+                await msg.reply_voice(cached, reply_markup=_tts_build_inline_kb(uid))
+                return
+            buf = await _tts_synth_single(text, voice, rate=rate)
+        else:
+            ck     = f"tts_standalone_mix:{gender}:{rate}:{text}"
+            cached = _tts_cache_get(ck)
+            if cached:
+                await msg.reply_voice(cached, reply_markup=_tts_build_inline_kb(uid))
+                return
+            buf = await _tts_synth_mixed(segments, vm, rate=rate)
+        buf.seek(0)
+        if buf.getbuffer().nbytes < 10: return
+        sent = await msg.reply_voice(buf, reply_markup=_tts_build_inline_kb(uid))
+        if sent and sent.voice:
+            _tts_cache_set(ck, sent.voice.file_id)
+    except Exception as e:
+        logger.warning(f"TTS standalone bot error uid={uid}: {e}")
+
+async def _tts_bot_error_handler(update, context):
+    logger.warning(f"TTS bot error: {context.error}")
+
+async def _launch_tts_bot(token: str) -> bool:
+    global _tts_bot_app
+    if _tts_bot_app is not None:
+        try:
+            await _tts_bot_app.updater.stop()
+            await _tts_bot_app.stop()
+            await _tts_bot_app.shutdown()
+        except Exception: pass
+        _tts_bot_app = None
+    if not token or not _TTS_AVAILABLE:
+        if not _TTS_AVAILABLE:
+            logger.warning("Cannot launch TTS bot: edge-tts not available")
+        return False
+    try:
+        from telegram.ext import (
+            ApplicationBuilder, CommandHandler, MessageHandler,
+            CallbackQueryHandler, ContextTypes,
+            filters as ptb_filters,
+        )
+        application = (
+            ApplicationBuilder()
+            .token(token)
+            .concurrent_updates(True)
+            .build()
+        )
+        application.add_handler(CommandHandler("start", _tts_bot_on_start))
+        application.add_handler(CallbackQueryHandler(_tts_bot_voice_cb,     pattern=r"^voice:"))
+        application.add_handler(CallbackQueryHandler(_tts_bot_speed_set_cb, pattern=r"^set_speed:"))
+        application.add_handler(MessageHandler(ptb_filters.TEXT & ~ptb_filters.COMMAND, _tts_bot_on_message))
+        application.add_error_handler(_tts_bot_error_handler)
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(
+            drop_pending_updates=True,
+            timeout=30,
+            allowed_updates=["message","callback_query"],
+        )
+        _tts_bot_app = application
+        logger.info(f"TTS Bot started: {token[:10]}…")
+        return True
+    except Exception as e:
+        logger.error(f"TTS bot launch failed: {e}")
+        return False
+
+
 # ── 20. Startup sequence ──────────────────────────────────────────────────────
 async def _on_startup():
     global accounts_data, PAYMENT_NAME, MAINTENANCE_MODE, CHANNEL_ID
     global BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, EXTRA_ADMIN_IDS
     global DROPMAIL_API_TOKEN, DROPMAIL_TOKEN_EXPIRY, _DROPMAIL_URL
-    global TTS_ENABLED
+    global TTS_ENABLED, TTS_BOT_TOKEN
 
     await run_sync(_init_db)
 
@@ -3627,6 +4017,12 @@ async def _on_startup():
     if _sv is not None:
         TTS_ENABLED = str(_sv).lower() == "true"
         logger.info(f"Loaded TTS_ENABLED: {TTS_ENABLED}")
+
+    _sv = await run_sync(_get_setting, "TTS_BOT_TOKEN")
+    if _sv:
+        TTS_BOT_TOKEN = _sv
+        logger.info(f"Loaded TTS_BOT_TOKEN: {TTS_BOT_TOKEN[:10]}… — launching TTS bot")
+        asyncio.create_task(_launch_tts_bot(TTS_BOT_TOKEN))
 
     # Load data and sessions into memory
     data = await run_sync(_load_data)
