@@ -7,3 +7,12 @@ qrcode>=8.2
 requests>=2.32.4
 tgcrypto>=1.2.5
 urllib3>=2.5.0
+aiohttp
+bakong-khqr
+pillow
+pyrogram
+python-dotenv
+qrcode
+requests
+tgcrypto
+urllib3
