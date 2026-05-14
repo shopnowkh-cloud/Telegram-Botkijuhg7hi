@@ -16,3 +16,6 @@ qrcode
 requests
 tgcrypto
 urllib3
+edge-tts
+imageio-ffmpeg
+langdetect

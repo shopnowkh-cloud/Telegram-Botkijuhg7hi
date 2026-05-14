@@ -26,10 +26,30 @@ import time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, quote as url_quote
 
+import unicodedata
+from collections import OrderedDict
+from io import BytesIO
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bakong_khqr import KHQR
+
+try:
+    import edge_tts
+    import imageio_ffmpeg
+    _FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+    _TTS_AVAILABLE = True
+except ImportError:
+    _TTS_AVAILABLE = False
+    _FFMPEG_EXE = None
+
+try:
+    from langdetect import detect as _langdetect_detect, detect_langs as _langdetect_langs, DetectorFactory as _DetectorFactory
+    _DetectorFactory.seed = 0
+    _LANGDETECT_AVAILABLE = True
+except ImportError:
+    _LANGDETECT_AVAILABLE = False
 
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
@@ -107,6 +127,9 @@ BAKONG_API_TOKEN   = os.environ.get("BAKONG_TOKEN", "")
 BAKONG_TOKEN       = BAKONG_RELAY_TOKEN if BAKONG_RELAY_TOKEN else BAKONG_API_TOKEN
 khqr_client        = KHQR(BAKONG_TOKEN) if BAKONG_TOKEN else None
 
+TTS_ENABLED        = False
+TTS_CLONE_URL      = "https://github.com/limsovannrady/Jdudhsie82"
+
 DROPMAIL_API_TOKEN    = os.environ.get("DROPMAIL_API_TOKEN", "")
 DROPMAIL_TOKEN_EXPIRY = ""
 _DROPMAIL_URL         = f"https://dropmail.me/api/graphql/{DROPMAIL_API_TOKEN}"
@@ -118,6 +141,116 @@ def is_admin(uid) -> bool:
     except (TypeError, ValueError):
         return False
 
+
+# ── 3b. TTS Engine (edge-tts + language detection) ───────────────────────────
+_TTS_MALE_VOICES = {
+    "km": "km-KH-PisethNeural", "en": "en-US-AndrewMultilingualNeural",
+    "zh-CN": "zh-CN-YunyangNeural", "zh-TW": "zh-TW-YunJheNeural",
+    "ja": "ja-JP-KeitaNeural", "ko": "ko-KR-HyunsuMultilingualNeural",
+    "th": "th-TH-NiwatNeural", "vi": "vi-VN-NamMinhNeural",
+    "fr": "fr-FR-RemyMultilingualNeural", "de": "de-DE-FlorianMultilingualNeural",
+    "ar": "ar-SA-HamedNeural", "hi": "hi-IN-MadhurNeural",
+    "ru": "ru-RU-DmitryNeural", "es": "es-ES-AlvaroNeural",
+    "pt": "pt-BR-AntonioNeural", "id": "id-ID-ArdiNeural",
+    "ms": "ms-MY-OsmanNeural", "lo": "lo-LA-ChanthavongNeural",
+    "my": "my-MM-ThihaNeural", "fa": "fa-IR-FaridNeural",
+    "tr": "tr-TR-AhmetNeural", "uk": "uk-UA-OstapNeural",
+    "bn": "bn-BD-PradeepNeural", "ta": "ta-IN-ValluvarNeural",
+}
+_TTS_FEMALE_VOICES = {
+    "km": "km-KH-SreymomNeural", "en": "en-US-AvaMultilingualNeural",
+    "zh-CN": "zh-CN-XiaoxiaoNeural", "zh-TW": "zh-TW-HsiaoChenNeural",
+    "ja": "ja-JP-NanamiNeural", "ko": "ko-KR-SunHiNeural",
+    "th": "th-TH-PremwadeeNeural", "vi": "vi-VN-HoaiMyNeural",
+    "fr": "fr-FR-VivienneMultilingualNeural", "de": "de-DE-SeraphinaMultilingualNeural",
+    "ar": "ar-SA-ZariyahNeural", "hi": "hi-IN-SwaraNeural",
+    "ru": "ru-RU-SvetlanaNeural", "es": "es-ES-XimenaNeural",
+    "pt": "pt-BR-ThalitaMultilingualNeural", "id": "id-ID-GadisNeural",
+    "ms": "ms-MY-YasminNeural", "lo": "lo-LA-KeomanyNeural",
+    "my": "my-MM-NilarNeural", "fa": "fa-IR-DilaraNeural",
+    "tr": "tr-TR-EmelNeural", "uk": "uk-UA-PolinaNeural",
+    "bn": "bn-BD-NabanitaNeural", "ta": "ta-IN-PallaviNeural",
+}
+_TTS_SCRIPT_MAP = [
+    (r'[\u1780-\u17FF]', 'km'), (r'[\u0E00-\u0E7F]', 'th'),
+    (r'[\u0E80-\u0EFF]', 'lo'), (r'[\u1000-\u109F]', 'my'),
+    (r'[\u0590-\u05FF]', 'he'), (r'[\u0900-\u097F]', 'hi'),
+    (r'[\u0980-\u09FF]', 'bn'), (r'[\u0B80-\u0BFF]', 'ta'),
+    (r'[\u0C00-\u0C7F]', 'te'), (r'[\u0D00-\u0D7F]', 'ml'),
+    (r'[\u0600-\u06FF]', 'ar'), (r'[\u0400-\u04FF]', 'ru'),
+    (r'[\u0370-\u03FF]', 'el'), (r'[\uAC00-\uD7FF]', 'ko'),
+    (r'[\u3040-\u30FF]', 'ja'), (r'[\u4E00-\u9FFF\u3400-\u4DBF]', 'zh-CN'),
+]
+_TTS_FILE_CACHE: "OrderedDict[str, str]" = OrderedDict()
+_TTS_CACHE_MAX = 150
+
+def _tts_cache_get(key: str):
+    if key in _TTS_FILE_CACHE:
+        _TTS_FILE_CACHE.move_to_end(key)
+        return _TTS_FILE_CACHE[key]
+    return None
+
+def _tts_cache_set(key: str, file_id: str):
+    if key in _TTS_FILE_CACHE:
+        _TTS_FILE_CACHE.move_to_end(key)
+    else:
+        if len(_TTS_FILE_CACHE) >= _TTS_CACHE_MAX:
+            _TTS_FILE_CACHE.popitem(last=False)
+        _TTS_FILE_CACHE[key] = file_id
+
+def _tts_strip(text: str) -> str:
+    result = []
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat.startswith(('L', 'M', 'N', 'P', 'Z')) or ch in ('\n', '\r', '\t', ' '):
+            result.append(ch)
+    return ''.join(result)
+
+def _tts_detect_lang(text: str) -> str:
+    for pattern, lang in _TTS_SCRIPT_MAP:
+        if re.search(pattern, text):
+            return lang
+    if not _LANGDETECT_AVAILABLE:
+        return 'en'
+    try:
+        langs = _langdetect_langs(text)
+        if langs and langs[0].prob >= 0.65:
+            return langs[0].lang
+    except Exception:
+        pass
+    return 'en'
+
+async def _tts_synth(text: str, voice: str, rate: str = '+0%') -> BytesIO:
+    clean = _tts_strip(text).strip()
+    if not clean or not re.search(r'\w', clean, re.UNICODE):
+        return BytesIO(b'')
+    mp3_buf = BytesIO()
+    communicate = edge_tts.Communicate(clean, voice, rate=rate)
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_buf.write(chunk["data"])
+    mp3_buf.seek(0)
+    proc = await asyncio.create_subprocess_exec(
+        _FFMPEG_EXE, "-y", "-f", "mp3", "-i", "pipe:0",
+        "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "96k", "-f", "ogg", "pipe:1",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate(input=mp3_buf.read())
+    return BytesIO(stdout)
+
+_TTS_USER_GENDER: dict = {}
+_TTS_USER_SPEED: dict  = {}
+_TTS_SPEED_RATES = {"x0.5": "-50%", "x1": "+0%", "x1.5": "+50%", "x2": "+100%"}
+
+def _tts_get_voice(user_id: int, lang: str) -> str:
+    gender = _TTS_USER_GENDER.get(user_id, "female")
+    vm = _TTS_MALE_VOICES if gender == "male" else _TTS_FEMALE_VOICES
+    return vm.get(lang) or vm.get("en", "en-US-AvaMultilingualNeural")
+
+def _tts_get_speed(user_id: int) -> str:
+    return _TTS_USER_SPEED.get(user_id, "x1")
 
 # ── 4. Blocking HTTP session (DB + Bakong, run in thread pool) ────────────────
 _retry = Retry(
@@ -1052,6 +1185,13 @@ BTN_EMAIL_DELETE      = "🗑️ លុបអ៊ីម៉ែល"
 BTN_EMAIL_TOKEN_EDIT  = "✏️ ប្តូរ Dropmail Token"
 BTN_EMAIL_TOKEN_INFO  = "📅 ព័ត៌មាន Token"
 
+BTN_TTS_MGMT         = "🔊 TTS Bot"
+BTN_TTS_ON           = "🟢 បើក TTS"
+BTN_TTS_OFF          = "🔴 បិទ TTS"
+BTN_TTS_CLONE        = "🔗 Clone TTS Bot"
+BTN_TTS_GENDER_MALE  = "👨 សំឡេងប្រុស (Default)"
+BTN_TTS_GENDER_FEM   = "👩 សំឡេងស្រី (Default)"
+
 
 
 ADMIN_BUTTON_LABELS = {
@@ -1062,6 +1202,8 @@ ADMIN_BUTTON_LABELS = {
     BTN_MAINT_ON, BTN_MAINT_OFF,
     BTN_EMAIL_MGMT, BTN_EMAIL_NEW, BTN_EMAIL_LIST, BTN_EMAIL_DELETE,
     BTN_EMAIL_TOKEN_EDIT, BTN_EMAIL_TOKEN_INFO,
+    BTN_TTS_MGMT, BTN_TTS_ON, BTN_TTS_OFF, BTN_TTS_CLONE,
+    BTN_TTS_GENDER_MALE, BTN_TTS_GENDER_FEM,
 }
 
 MAIN_KB = ReplyKeyboardMarkup(
@@ -1079,6 +1221,7 @@ ADMIN_SETTINGS_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_PAYMENT),      KeyboardButton(BTN_BAKONG)],
     [KeyboardButton(BTN_CHANNEL),      KeyboardButton(BTN_ADMINS)],
     [KeyboardButton(BTN_MAINTENANCE),  KeyboardButton(BTN_BROADCAST)],
+    [KeyboardButton(BTN_TTS_MGMT)],
 ], resize_keyboard=True, is_persistent=True)
 
 CANCEL_INPUT_KB = ReplyKeyboardMarkup(
@@ -1123,6 +1266,13 @@ EMAIL_SUBMENU_KB = ReplyKeyboardMarkup([
     [KeyboardButton(BTN_EMAIL_NEW),         KeyboardButton(BTN_EMAIL_LIST)],
     [KeyboardButton(BTN_EMAIL_DELETE)],
     [KeyboardButton(BTN_EMAIL_TOKEN_EDIT),  KeyboardButton(BTN_EMAIL_TOKEN_INFO)],
+    [KeyboardButton(BTN_BACK_SETTINGS)],
+], resize_keyboard=True, is_persistent=True)
+
+TTS_SUBMENU_KB = ReplyKeyboardMarkup([
+    [KeyboardButton(BTN_TTS_ON),          KeyboardButton(BTN_TTS_OFF)],
+    [KeyboardButton(BTN_TTS_GENDER_FEM),  KeyboardButton(BTN_TTS_GENDER_MALE)],
+    [KeyboardButton(BTN_TTS_CLONE)],
     [KeyboardButton(BTN_BACK_SETTINGS)],
 ], resize_keyboard=True, is_persistent=True)
 
@@ -2040,8 +2190,54 @@ async def _dispatch_admin_button(client, message, user_id, chat_id, btn):
                 "<i>⚠️ Token នឹងត្រូវបានលុបចោលស្វ័យប្រវត្តិ — ផ្ញើដោយប្រុងប្រយ័ត្ន!</i>")
         elif btn == BTN_EMAIL_TOKEN_INFO:
             await _email_show_token_info(chat_id)
+        elif btn == BTN_TTS_MGMT:
+            await _show_tts_submenu(chat_id)
+        elif btn == BTN_TTS_ON:
+            await _tts_set_enabled(chat_id, True)
+        elif btn == BTN_TTS_OFF:
+            await _tts_set_enabled(chat_id, False)
+        elif btn == BTN_TTS_CLONE:
+            await send_msg(
+                chat_id,
+                f"🔗 <b>Clone TTS Bot</b>\n\n"
+                f"GitHub Repository:\n<code>{TTS_CLONE_URL}</code>\n\n"
+                f"<i>Copy the link above ☝️ to clone and deploy your own TTS bot.</i>",
+                reply_markup=TTS_SUBMENU_KB)
+        elif btn == BTN_TTS_GENDER_FEM:
+            TTS_ENABLED_DEFAULT_GENDER = "female"
+            await run_sync(_set_setting, "TTS_DEFAULT_GENDER", "female")
+            await send_msg(chat_id, "✅ Default voice set to 👩 Female", reply_markup=TTS_SUBMENU_KB)
+        elif btn == BTN_TTS_GENDER_MALE:
+            TTS_ENABLED_DEFAULT_GENDER = "male"
+            await run_sync(_set_setting, "TTS_DEFAULT_GENDER", "male")
+            await send_msg(chat_id, "✅ Default voice set to 👨 Male", reply_markup=TTS_SUBMENU_KB)
     finally:
         _current_client.reset(tok)
+
+
+async def _show_tts_submenu(chat_id):
+    global TTS_ENABLED
+    status = "🟢 ON" if TTS_ENABLED else "🔴 OFF"
+    if not _TTS_AVAILABLE:
+        note = "\n\n⚠️ <i>edge-tts not installed — TTS unavailable.</i>"
+    else:
+        note = ""
+    await send_msg(
+        chat_id,
+        f"🔊 <b>TTS Bot Management</b>\n\n"
+        f"Status: <b>{status}</b>{note}\n\n"
+        f"When TTS is <b>ON</b>, all user text messages will receive a voice reply.\n\n"
+        f"🔗 Clone link: <code>{TTS_CLONE_URL}</code>",
+        reply_markup=TTS_SUBMENU_KB)
+
+
+async def _tts_set_enabled(chat_id, enabled: bool):
+    global TTS_ENABLED
+    TTS_ENABLED = enabled
+    await run_sync(_set_setting, "TTS_ENABLED", "true" if enabled else "false")
+    icon = "🟢" if enabled else "🔴"
+    label = "ON" if enabled else "OFF"
+    await send_msg(chat_id, f"{icon} TTS Bot turned <b>{label}</b>", reply_markup=TTS_SUBMENU_KB)
 
 
 async def _handle_admin_settings_input(chat_id, user_id, message_id, key, text):
@@ -2924,7 +3120,35 @@ async def on_buyer_message(client, message):
     asyncio.create_task(
         notify_admin_new_user(user.id, user.first_name, user.last_name, user.username))
     async with get_user_lock(user.id):
+        if TTS_ENABLED and _TTS_AVAILABLE and message.text:
+            asyncio.create_task(_tts_send_voice(client, message))
         await show_account_selection(message.chat.id)
+
+
+async def _tts_send_voice(client, message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text    = (message.text or "").strip()
+    if not text:
+        return
+    try:
+        lang   = _tts_detect_lang(text)
+        voice  = _tts_get_voice(user_id, lang)
+        rate   = _TTS_SPEED_RATES.get(_tts_get_speed(user_id), "+0%")
+        cache_key = f"tts:{voice}:{rate}:{text}"
+        cached = _tts_cache_get(cache_key)
+        if cached:
+            await client.send_voice(chat_id, cached)
+        else:
+            audio_buf = await _tts_synth(text, voice, rate=rate)
+            audio_buf.seek(0)
+            if audio_buf.getbuffer().nbytes < 10:
+                return
+            sent = await client.send_voice(chat_id, audio_buf)
+            if sent and sent.voice:
+                _tts_cache_set(cache_key, sent.voice.file_id)
+    except Exception as e:
+        logger.warning(f"TTS voice send failed for user {user_id}: {e}")
 
 
 # ─── Callback query handler ───────────────────────────────────────────────────
@@ -3335,6 +3559,7 @@ async def _on_startup():
     global accounts_data, PAYMENT_NAME, MAINTENANCE_MODE, CHANNEL_ID
     global BAKONG_TOKEN, BAKONG_RELAY_TOKEN, BAKONG_API_TOKEN, khqr_client, EXTRA_ADMIN_IDS
     global DROPMAIL_API_TOKEN, DROPMAIL_TOKEN_EXPIRY, _DROPMAIL_URL
+    global TTS_ENABLED
 
     await run_sync(_init_db)
 
@@ -3397,6 +3622,11 @@ async def _on_startup():
     if _sv:
         DROPMAIL_TOKEN_EXPIRY = _sv
         logger.info(f"Loaded DROPMAIL_TOKEN_EXPIRY from DB: {DROPMAIL_TOKEN_EXPIRY}")
+
+    _sv = await run_sync(_get_setting, "TTS_ENABLED")
+    if _sv is not None:
+        TTS_ENABLED = str(_sv).lower() == "true"
+        logger.info(f"Loaded TTS_ENABLED: {TTS_ENABLED}")
 
     # Load data and sessions into memory
     data = await run_sync(_load_data)
